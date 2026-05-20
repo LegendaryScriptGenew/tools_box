@@ -4,7 +4,7 @@ Docker 远程管理工具  v2.6.0
 通过SSH连接远程服务器，管理Docker容器、网络等
 """
 
-import sys, os, logging, threading, time
+import sys, os, logging, threading, time, json
 from datetime import datetime
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
@@ -52,42 +52,42 @@ STYLE_INPUT_FLAT = """
 """
 STYLE_BTN_PRIMARY = """
     QPushButton {
-        background: #0984e3; color: white; border: none;
+        background: #5b7a9a; color: white; border: none;
         padding: 8px 24px; border-radius: 4px; font-weight: bold; font-size: 13px;
     }
-    QPushButton:hover { background: #0873c4; }
-    QPushButton:disabled { background: #b2bec3; }
+    QPushButton:hover { background: #4e6b89; }
+    QPushButton:disabled { background: #c8d0d8; }
 """
 STYLE_BTN_DANGER = """
     QPushButton {
-        background: #d63031; color: white; border: none;
+        background: #b85450; color: white; border: none;
         padding: 8px 24px; border-radius: 4px; font-weight: bold; font-size: 13px;
     }
-    QPushButton:hover { background: #c0392b; }
-    QPushButton:disabled { background: #b2bec3; }
+    QPushButton:hover { background: #a34945; }
+    QPushButton:disabled { background: #c8d0d8; }
 """
 STYLE_BTN_SUCCESS = """
     QPushButton {
-        background: #27ae60; color: white; border: none;
+        background: #5d8a6a; color: white; border: none;
         padding: 8px 24px; border-radius: 4px; font-weight: bold; font-size: 13px;
     }
-    QPushButton:hover { background: #219a52; }
-    QPushButton:disabled { background: #b2bec3; }
+    QPushButton:hover { background: #4f7a5d; }
+    QPushButton:disabled { background: #c8d0d8; }
 """
 STYLE_BTN_CTRL = """
     QPushButton {
         border: none; border-radius: 3px;
         padding: 5px 14px; font-size: 12px; font-weight: bold; color: white;
     }
-    QPushButton:disabled { background: #b2bec3; color: #dfe6e9; }
+    QPushButton:disabled { background: #c8d0d8; color: #e8ecf0; }
 """
 STYLE_BTN_CANCEL = """
     QPushButton {
-        background: white; color: #636e72;
-        border: 1px solid #b2bec3; border-radius: 4px;
+        background: white; color: #6b7a7f;
+        border: 1px solid #c8d0d8; border-radius: 4px;
         padding: 8px 20px; font-size: 13px;
     }
-    QPushButton:hover { background: #f0f2f5; }
+    QPushButton:hover { background: #f0f3f5; }
 """
 STYLE_CARD_TITLE = "font-size: 12px; color: #636e72; font-weight: normal;"
 
@@ -1520,69 +1520,143 @@ class ContainerDetailDialog(QDialog):
 
 
 class BatchImportDialog(QDialog):
-    def __init__(self, parent=None, existing_names=None, existing_ips=None):
+    _HEADERS = [
+        "hostname", "container_name", "container_type",
+        "network1_name", "ipv4_1", "ipv6_1",
+        "image_ID", "cpu", "mem_gb", "shm_size", "restart",
+        "network2_name", "ipv4_2", "ipv6_2",
+        "network3_name", "ipv4_3", "ipv6_3",
+    ]
+    _IPV6_TABLE_COLS = [i + 1 for i, h in enumerate(_HEADERS) if h.startswith("ipv6")]  # +1 for checkbox col
+
+    def __init__(self, parent=None, existing_names=None, existing_ips=None, config_path=None):
         super().__init__(parent)
         self.setWindowTitle("📋 批量导入容器")
-        self.setMinimumSize(1200, 624)
+        self.setMinimumSize(1200, 680)
         self._commands = []
         self._parsed = []
         self._existing_names = set(existing_names or [])
         self._existing_ips = set(existing_ips or [])
-        input_max = 300
+        self._config_path = config_path or os.path.join(
+            os.path.dirname(__file__), "config", "docker_batch_config.json")
+        self._updating_table = False
+        self._clipboard = None
+
         vl = QVBoxLayout(self)
         vl.setContentsMargins(20, 16, 20, 16)
         vl.setSpacing(8)
 
-        h1 = QHBoxLayout()
-        self.file_path = QLineEdit()
-        self.file_path.setReadOnly(True)
-        self.file_path.setPlaceholderText("选择 Excel 文件...")
-        self.file_path.setStyleSheet(STYLE_INPUT)
-        self.browse_btn = QPushButton("📁 选择文件")
-        self.browse_btn.setStyleSheet("background: #0984e3; color: white; border: none; border-radius: 4px; padding: 6px 14px;")
-        self.browse_btn.clicked.connect(self._browse_file)
-        h1.addWidget(self.file_path, 1)
-        h1.addWidget(self.browse_btn)
-        vl.addLayout(h1)
+        # Toolbar
+        tool_row = QHBoxLayout()
+        tool_row.setSpacing(6)
+        add_row_btn = QPushButton("+ 添加行")
+        add_row_btn.setStyleSheet(
+            "QPushButton{background:#5b7a9a;color:white;border:none;"
+            "border-radius:4px;padding:6px 14px;font-size:12px;}"
+            "QPushButton:hover{background:#4e6b89;}")
+        add_row_btn.clicked.connect(self._add_row)
+        tool_row.addWidget(add_row_btn)
 
-        h2 = QHBoxLayout()
-        vlbl = QLabel("卷挂载路径:")
-        vlbl.setStyleSheet("font-size: 13px;")
+        del_row_btn = QPushButton("✕ 删除行")
+        del_row_btn.setStyleSheet(
+            "QPushButton{background:#b85450;color:white;border:none;"
+            "border-radius:4px;padding:6px 14px;font-size:12px;}"
+            "QPushButton:hover{background:#a34945;}")
+        del_row_btn.clicked.connect(self._delete_row)
+        tool_row.addWidget(del_row_btn)
+
+        detail_btn = QPushButton("📋 详情")
+        detail_btn.setStyleSheet(
+            "QPushButton{background:#f0f3f5;color:#5b7a9a;border:1px solid #c8d0d8;"
+            "border-radius:4px;padding:6px 14px;font-size:12px;}"
+            "QPushButton:hover{background:#e4e8ec;}")
+        detail_btn.clicked.connect(self._show_selected_detail)
+        tool_row.addWidget(detail_btn)
+
+        copy_btn = QPushButton("📋 复制行")
+        copy_btn.setStyleSheet(
+            "QPushButton{background:#f0f3f5;color:#5b7a9a;border:1px solid #c8d0d8;"
+            "border-radius:4px;padding:6px 14px;font-size:12px;}"
+            "QPushButton:hover{background:#e4e8ec;}")
+        copy_btn.clicked.connect(self._copy_row)
+        tool_row.addWidget(copy_btn)
+
+        paste_btn = QPushButton("📌 粘贴行")
+        paste_btn.setStyleSheet(
+            "QPushButton{background:#f0f3f5;color:#5b7a9a;border:1px solid #c8d0d8;"
+            "border-radius:4px;padding:6px 14px;font-size:12px;}"
+            "QPushButton:hover{background:#e4e8ec;}")
+        paste_btn.clicked.connect(self._paste_row)
+        tool_row.addWidget(paste_btn)
+
+        self.ipv6_cb = QCheckBox("IPv6")
+        self.ipv6_cb.setChecked(True)
+        self.ipv6_cb.toggled.connect(self._toggle_ipv6)
+        self.ipv6_cb.setStyleSheet("font-size:12px; color:#5b7a9a; spacing:4px;")
+        tool_row.addWidget(self.ipv6_cb)
+
+        tool_row.addStretch()
+
+        load_btn = QPushButton("📂 加载配置")
+        load_btn.setStyleSheet(
+            "QPushButton{background:#f0f3f5;color:#5b7a9a;border:1px solid #c8d0d8;"
+            "border-radius:4px;padding:6px 14px;font-size:12px;}"
+            "QPushButton:hover{background:#e4e8ec;}")
+        load_btn.clicked.connect(self._load_config)
+        tool_row.addWidget(load_btn)
+
+        save_btn = QPushButton("💾 保存配置")
+        save_btn.setStyleSheet(
+            "QPushButton{background:#f0f3f5;color:#5b7a9a;border:1px solid #c8d0d8;"
+            "border-radius:4px;padding:6px 14px;font-size:12px;}"
+            "QPushButton:hover{background:#e4e8ec;}")
+        save_btn.clicked.connect(self._save_config)
+        tool_row.addWidget(save_btn)
+
+        vl.addLayout(tool_row)
+
+        # Volume
+        vol_row = QHBoxLayout()
+        vol_row.addWidget(QLabel("卷挂载路径:"))
         self.volume_input = QLineEdit()
-        self.volume_input.setPlaceholderText("多个以逗号分隔，默认 /opt/tar/:/opt/tar/")
-        self.volume_input.setStyleSheet(STYLE_INPUT)
+        self.volume_input.setPlaceholderText("多个以逗号分隔")
         self.volume_input.setText("/opt/tar/:/opt/tar/,/sys/fs/cgroup:/sys/fs/cgroup:ro")
-        h2.addWidget(vlbl)
-        h2.addWidget(self.volume_input, 1)
-        vl.addLayout(h2)
+        self.volume_input.setStyleSheet(STYLE_INPUT)
+        vol_row.addWidget(self.volume_input, 1)
+        vl.addLayout(vol_row)
 
+        # Separator
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet("background: #dfe6e9; max-height: 1px;")
         vl.addWidget(sep)
 
+        # Editable table: checkbox + 17 data columns + status column
         self.preview = QTableWidget()
-        self.preview.setColumnCount(8)
-        self.preview.setHorizontalHeaderLabels([
-            "hostname", "container_name", "container_type", "network1",
-            "ipv4_1", "image", "cpu/mem/shm", "状态"
-        ])
+        all_headers = ["导入"] + list(self._HEADERS) + ["状态"]
+        self.preview.setColumnCount(len(all_headers))
+        self.preview.setHorizontalHeaderLabels(all_headers)
         self.preview.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.preview.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.preview.setSelectionMode(QAbstractItemView.NoSelection)
-        self.preview.cellDoubleClicked.connect(self._show_row_detail)
+        self.preview.setEditTriggers(
+            QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
+        self.preview.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.preview.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.preview.cellChanged.connect(self._on_cell_changed)
         vl.addWidget(self.preview, 1)
 
+        # Progress
         self.progress = QProgressBar()
         self.progress.setVisible(False)
         vl.addWidget(self.progress)
 
+        # Buttons
         btn_row = QHBoxLayout()
         btn_row.addStretch()
         self.import_btn = QPushButton("🚀 开始导入")
         self.import_btn.setStyleSheet("""
-            QPushButton { background: #0984e3; color: white; border: none; border-radius: 4px; padding: 8px 20px; font-size: 14px; }
-            QPushButton:disabled { background: #b2bec3; color: #dfe6e9; }
+            QPushButton { background: #5b7a9a; color: white; border: none;
+            border-radius: 4px; padding: 8px 20px; font-size: 14px; }
+            QPushButton:disabled { background: #c8d0d8; color: #e8ecf0; }
         """)
         self.import_btn.clicked.connect(self._do_import)
         self.import_btn.setEnabled(False)
@@ -1593,233 +1667,267 @@ class BatchImportDialog(QDialog):
         btn_row.addWidget(cancel_btn)
         vl.addLayout(btn_row)
 
-    def _browse_file(self):
-        path, _ = QFileDialog.getOpenFileName(self, "选择Excel文件", "", "Excel文件 (*.xlsx *.xls)")
-        if path:
-            self.file_path.setText(path)
-            self._parse_file(path)
+        # Auto-load config
+        self._load_config(silent=True)
 
-    def _parse_file(self, path):
-        import openpyxl as _xl
+    # ── Row management ──
+
+    def _add_row(self):
+        empty = {h: "" for h in self._HEADERS}
+        empty["_row"] = len(self._parsed) + 1
+        empty["_errors"] = []
+        self._parsed.append(empty)
+        self._update_preview()
+        self._update_import_btn()
+
+    def _delete_row(self):
+        rows = sorted(set(
+            r.row() for r in self.preview.selectedIndexes()
+        ), reverse=True)
+        if not rows:
+            QMessageBox.warning(self, "提示", "请先选择要删除的行")
+            return
+        for r in rows:
+            if r < len(self._parsed):
+                self._parsed.pop(r)
+        self._update_preview()
+        self._update_import_btn()
+
+    def _show_selected_detail(self):
+        rows = sorted(set(r.row() for r in self.preview.selectedIndexes()))
+        if not rows:
+            QMessageBox.warning(self, "提示", "请先选择一行")
+            return
+        self._show_row_detail(rows[0], 0)
+
+    def _copy_row(self):
+        rows = sorted(set(r.row() for r in self.preview.selectedIndexes()))
+        if not rows:
+            QMessageBox.warning(self, "提示", "请先选择一行")
+            return
+        d = self._parsed[rows[0]]
+        self._clipboard = {h: d.get(h, "") for h in self._HEADERS}
+        QMessageBox.information(self, "提示", f"已复制第 {rows[0]+1} 行")
+
+    def _paste_row(self):
+        if not self._clipboard:
+            QMessageBox.warning(self, "提示", "请先复制一行")
+            return
+        rows = sorted(set(r.row() for r in self.preview.selectedIndexes()))
+        insert_after = rows[-1] if rows else len(self._parsed) - 1
+        new = {h: self._clipboard.get(h, "") for h in self._HEADERS}
+        new["_row"] = len(self._parsed) + 1
+        new["_errors"] = []
+        self._parsed.insert(insert_after + 1, new)
+        self._update_preview()
+        self._update_import_btn()
+
+    def _toggle_ipv6(self, visible):
+        for col in self._IPV6_TABLE_COLS:
+            self.preview.setColumnHidden(col, not visible)
+
+    # ── Config persistence ──
+
+    def _load_config(self, silent=False):
+        path = self._config_path
+        if not os.path.exists(path):
+            if not silent:
+                QMessageBox.information(self, "提示", "配置文件不存在，将使用空模板")
+            return
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            self._parsed = []
+            for i, item in enumerate(data):
+                d = {h: str(item.get(h, "")) for h in self._HEADERS}
+                d["_row"] = i + 1
+                d["_errors"] = []
+                self._parsed.append(d)
+            self._validate_all()
+            self._update_preview()
+            self._toggle_ipv6(self.ipv6_cb.isChecked())
+            self._update_import_btn()
+            if not silent:
+                QMessageBox.information(self, "完成", f"已加载 {len(self._parsed)} 条配置")
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"加载配置文件失败:\n{e}")
+
+    def _save_config(self):
+        os.makedirs(os.path.dirname(self._config_path), exist_ok=True)
+        data = []
+        for d in self._parsed:
+            entry = {h: d.get(h, "") for h in self._HEADERS}
+            data.append(entry)
+        try:
+            with open(self._config_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            QMessageBox.information(self, "完成", f"已保存 {len(data)} 条配置到:\n{self._config_path}")
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"保存失败:\n{e}")
+
+    # ── Table sync ──
+
+    def _on_cell_changed(self, row, col):
+        if self._updating_table:
+            return
+        if col == 0:
+            return
+        data_col = col - 1
+        if row >= len(self._parsed) or data_col >= len(self._HEADERS):
+            return
+        item = self.preview.item(row, col)
+        val = item.text().strip() if item else ""
+        self._parsed[row][self._HEADERS[data_col]] = val
+        self._validate_row(self._parsed[row])
+        self._update_status_cell(row, self._parsed[row])
+        self._update_import_btn()
+
+    # ── Validation ──
+
+    def _validate_all(self):
         import re as _re
-        wb = _xl.load_workbook(path, data_only=True)
-        ws = wb.active
-        rows = list(ws.iter_rows(min_row=2, values_only=True))
-        wb.close()
-
-        headers = [
-            "hostname", "container_name", "container_type",
-            "network1_name", "ipv4_1", "ipv6_1",
-            "image_ID", "cpu", "mem_gb", "shm_size", "restart",
-            "network2_name", "ipv4_2", "ipv6_2",
-            "network3_name", "ipv4_3", "ipv6_3",
-        ]
-        self._parsed = []
-        errors = []
         names_seen = set()
         ips_seen = set()
+        for d in self._parsed:
+            self._validate_row(d, names_seen, ips_seen)
+            names_seen.add(d.get("container_name", ""))
+            for k in ("ipv4_1", "ipv4_2", "ipv4_3"):
+                v = d.get(k, "").strip()
+                if v:
+                    ips_seen.add(v)
 
-        for i, row in enumerate(rows, 1):
-            vals = [str(c).strip() if c is not None else "" for c in row]
-            # Ensure row length matches headers
-            while len(vals) < len(headers):
-                vals.append("")
-            d = dict(zip(headers, vals))
-            d["_row"] = i
-            errs = []
-            # Required fields
-            for field in ("hostname", "container_name", "container_type", "network1_name", "ipv4_1", "image_ID"):
-                if not d.get(field):
-                    errs.append(f"{field} 为空")
-            if not errs:
-                ctype = d.get("container_type", "")
-                if ctype not in ("1", "2", "3"):
-                    errs.append("container_type 无效")
-            v4 = d.get("ipv4_1", "")
-            if v4 and not errs:
-                m = _re.match(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$", v4)
-                if not m or any(int(m.group(i)) > 255 for i in range(1, 5)):
-                    errs.append("ipv4_1 格式错误")
-            v6 = d.get("ipv6_1", "").strip()
-            if v6:
-                if not _re.match(r"^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$", v6):
-                    errs.append("ipv6_1 格式错误")
-            # Container name no spaces
-            if " " in d["container_name"]:
-                errs.append("container_name 不能有空格")
-            # Check duplicate names
-            cname = d["container_name"]
-            if cname and cname in names_seen:
-                errs.append("container_name 重复")
-            names_seen.add(cname)
-            # Check name conflict with existing containers
-            if cname and cname in self._existing_names:
-                errs.append(f"container_name \"{cname}\" 已存在")
-            # Collect all IPs from this row for conflict check
-            all_ips = set()
-            for ip_key in ("ipv4_1", "ipv4_2", "ipv4_3"):
-                ip_val = d.get(ip_key, "").strip()
-                if ip_val:
-                    all_ips.add(ip_val)
-                    if ip_val in ips_seen:
-                        errs.append(f"{ip_key} \"{ip_val}\" 在文件中重复")
-                    if ip_val in self._existing_ips:
-                        errs.append(f"{ip_key} \"{ip_val}\" 已被其他容器使用")
-                    ips_seen.add(ip_val)
-            # Type-specific validation
-            ctype = d.get("container_type", "")
-            if ctype in ("2", "3"):
-                cpu = d.get("cpu", "")
-                mem = d.get("mem_gb", "")
-                if not cpu or not cpu.isdigit() or int(cpu) < 1:
-                    errs.append("cpu 无效")
-                if not mem or not mem.isdigit() or int(mem) < 1:
-                    errs.append("mem_gb 无效")
-            if ctype == "3":
-                shm = d.get("shm_size", "")
-                if not shm:
-                    errs.append("shm_size 为空")
-            # NIC2 validation
-            n2 = d.get("network2_name", "")
-            if n2:
-                v4_2 = d.get("ipv4_2", "")
-                if not v4_2:
-                    errs.append("ipv4_2 为空(有network2_name)")
-                else:
-                    m = _re.match(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$", v4_2)
-                    if not m or any(int(m.group(i)) > 255 for i in range(1, 5)):
-                        errs.append("ipv4_2 格式错误")
-                v6_2 = d.get("ipv6_2", "").strip()
-                if v6_2 and not _re.match(r"^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$", v6_2):
-                    errs.append("ipv6_2 格式错误")
-            # NIC3 validation
-            n3 = d.get("network3_name", "")
-            if n3:
-                v4_3 = d.get("ipv4_3", "")
-                if not v4_3:
-                    errs.append("ipv4_3 为空(有network3_name)")
-                else:
-                    m = _re.match(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$", v4_3)
-                    if not m or any(int(m.group(i)) > 255 for i in range(1, 5)):
-                        errs.append("ipv4_3 格式错误")
-                v6_3 = d.get("ipv6_3", "").strip()
-                if v6_3 and not _re.match(r"^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$", v6_3):
-                    errs.append("ipv6_3 格式错误")
-            d["_errors"] = errs
-            self._parsed.append(d)
+    def _validate_row(self, d, names_seen=None, ips_seen=None):
+        import re as _re
+        errs = []
+        if names_seen is None:
+            names_seen = set()
+        if ips_seen is None:
+            ips_seen = set()
 
-        self._update_preview()
-        valid = all(not d["_errors"] for d in self._parsed)
-        self.import_btn.setEnabled(valid and len(self._parsed) > 0)
+        for field in ("hostname", "container_name", "container_type", "network1_name", "ipv4_1", "image_ID"):
+            if not d.get(field):
+                errs.append(f"{field} 为空")
+
+        ctype = d.get("container_type", "")
+        if ctype and ctype not in ("1", "2", "3"):
+            errs.append("container_type 无效")
+
+        v4 = d.get("ipv4_1", "")
+        if v4:
+            m = _re.match(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$", v4)
+            if not m or any(int(m.group(i)) > 255 for i in range(1, 5)):
+                errs.append("ipv4_1 格式错误")
+
+        v6 = d.get("ipv6_1", "").strip()
+        if v6:
+            if not _re.match(r"^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$", v6):
+                errs.append("ipv6_1 格式错误")
+
+        cname = d.get("container_name", "")
+        if " " in cname:
+            errs.append("container_name 不能有空格")
+        if cname and cname in names_seen:
+            errs.append("container_name 重复")
+        if cname and cname in self._existing_names:
+            errs.append(f"名称 \"{cname}\" 已存在")
+
+        all_ips = set()
+        for ip_key in ("ipv4_1", "ipv4_2", "ipv4_3"):
+            ip_val = d.get(ip_key, "").strip()
+            if ip_val:
+                all_ips.add(ip_val)
+                if ip_val in ips_seen:
+                    errs.append(f"{ip_key} \"{ip_val}\" 重复")
+                if ip_val in self._existing_ips:
+                    errs.append(f"{ip_key} \"{ip_val}\" 已被使用")
+
+        if ctype in ("2", "3"):
+            cpu = d.get("cpu", "")
+            mem = d.get("mem_gb", "")
+            if not cpu or not cpu.isdigit() or int(cpu) < 1:
+                errs.append("cpu 无效")
+            if not mem or not mem.isdigit() or int(mem) < 1:
+                errs.append("mem_gb 无效")
+
+        if ctype == "3":
+            shm = d.get("shm_size", "")
+            if not shm:
+                errs.append("shm_size 为空")
+
+        for suffix in ("2", "3"):
+            n = d.get(f"network{suffix}_name", "")
+            if n:
+                v4x = d.get(f"ipv4_{suffix}", "")
+                if not v4x:
+                    errs.append(f"ipv4_{suffix} 为空")
+                else:
+                    m = _re.match(r"^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$", v4x)
+                    if not m or any(int(m.group(i)) > 255 for i in range(1, 5)):
+                        errs.append(f"ipv4_{suffix} 格式错误")
+                v6x = d.get(f"ipv6_{suffix}", "").strip()
+                if v6x and not _re.match(r"^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$", v6x):
+                    errs.append(f"ipv6_{suffix} 格式错误")
+
+        d["_errors"] = errs
+        return errs
+
+    # ── UI sync ──
 
     def _update_preview(self):
+        self._updating_table = True
         self.preview.setRowCount(len(self._parsed))
-        types = {"1": "普通无限制", "2": "普通限制", "3": "DB"}
         for i, d in enumerate(self._parsed):
-            cpu_mem_shm = ""
-            ctype = d.get("container_type", "")
-            if ctype in ("2", "3"):
-                cpu_mem_shm = f"CPU:{d.get('cpu','')} MEM:{d.get('mem_gb','')}G"
-                if ctype == "3":
-                    cpu_mem_shm += f" SHM:{d.get('shm_size','')}"
-            items = [
-                d.get("hostname", ""),
-                d.get("container_name", ""),
-                types.get(ctype, ctype),
-                d.get("network1_name", ""),
-                d.get("ipv4_1", ""),
-                d.get("image_ID", ""),
-                cpu_mem_shm,
-            ]
-            errs = d.get("_errors", [])
-            status = "✅" if not errs else f"❌ {'; '.join(errs)}"
-            items.append(status)
-            for j, val in enumerate(items):
-                it = QTableWidgetItem(val)
-                if errs:
-                    it.setForeground(QColor("#d63031"))
-                self.preview.setItem(i, j, it)
+            # Checkbox column
+            chk = QTableWidgetItem()
+            chk.setFlags(Qt.ItemIsUserCheckable | Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+            chk.setCheckState(Qt.Checked)
+            self.preview.setItem(i, 0, chk)
+            # Data columns
+            for j, h in enumerate(self._HEADERS):
+                val = d.get(h, "")
+                item = QTableWidgetItem(val)
+                item.setToolTip(val)
+                self.preview.setItem(i, j + 1, item)
+            self._update_status_cell(i, d)
+        self._updating_table = False
+
+    def _update_status_cell(self, row, d):
+        errs = d.get("_errors", [])
+        status_col = len(self._HEADERS) + 1
+        if errs:
+            item = QTableWidgetItem("❌ " + "; ".join(errs[:3]))
+            item.setToolTip("\n".join(errs))
+            item.setBackground(QColor("#fce4e4"))
+        else:
+            item = QTableWidgetItem("✅ 有效")
+            item.setBackground(QColor("#e8f5e9"))
+        self.preview.setItem(row, status_col, item)
+
+    def _update_import_btn(self):
+        has_any = False
+        for i, d in enumerate(self._parsed):
+            item = self.preview.item(i, 0)
+            if item and item.checkState() == Qt.Checked and not d.get("_errors", []):
+                has_any = True
+                break
+        self.import_btn.setEnabled(has_any)
 
     def _show_row_detail(self, row, col):
         if row < 0 or row >= len(self._parsed):
             return
         d = self._parsed[row]
-        types = {"1": "普通无限制", "2": "普通限制", "3": "DB"}
-        fields = [
-            ("hostname", "主机名称"),
-            ("container_name", "容器名称"),
-            ("container_type", "容器类型"),
-            ("network1_name", "网络1"),
-            ("ipv4_1", "IPv4_1"),
-            ("ipv6_1", "IPv6_1"),
-            ("image_ID", "镜像"),
-            ("cpu", "CPU"),
-            ("mem_gb", "内存(GB)"),
-            ("shm_size", "共享内存"),
-            ("restart", "重启策略"),
-            ("network2_name", "网络2"),
-            ("ipv4_2", "IPv4_2"),
-            ("ipv6_2", "IPv6_2"),
-            ("network3_name", "网络3"),
-            ("ipv4_3", "IPv4_3"),
-            ("ipv6_3", "IPv6_3"),
-        ]
         errs = d.get("_errors", [])
-        dlg = QDialog(self)
-        dlg.setWindowTitle(f"行{row+1} 详情 — {d.get('container_name','')}")
-        dlg.setMinimumWidth(420)
-        fl = QFormLayout(dlg)
-        fl.setLabelAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        fl.setContentsMargins(16, 12, 16, 12)
-        fl.setSpacing(6)
-
-        # Display each field
-        for key, label in fields:
-            raw = d.get(key, "")
-            val = types.get(raw, raw) if key == "container_type" else raw
-            lbl = QLabel(val if val else "—")
-            lbl.setStyleSheet("font-size: 13px;")
-            lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            # Check if this key has an error
-            has_err = any(key in e for e in errs)
-            if has_err:
-                lbl.setStyleSheet("font-size: 13px; color: #d63031;")
-            fl.addRow(label + ":", lbl)
-
-        # Error summary at bottom
+        lines = [f"第 {row+1} 行:"]
+        for h in self._HEADERS:
+            lines.append(f"  {h}: {d.get(h, '')}")
         if errs:
-            sep = QFrame()
-            sep.setFrameShape(QFrame.Shape.HLine)
-            sep.setStyleSheet("background: #ff7675; max-height: 1px; margin: 4px 0;")
-            fl.addRow(sep)
-            err_text = QLabel("\n".join(f"❌ {e}" for e in errs))
-            err_text.setStyleSheet("color: #d63031; font-size: 12px;")
-            err_text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            fl.addRow(err_text)
+            lines.append("")
+            lines.append("错误:")
+            for e in errs:
+                lines.append(f"  ❌ {e}")
+        QMessageBox.information(self, "行详情", "\n".join(lines))
 
-        btn_row = QHBoxLayout()
-        btn_row.addStretch()
-        close_btn = QPushButton("关闭")
-        close_btn.setStyleSheet(STYLE_BTN_CANCEL)
-        close_btn.clicked.connect(dlg.accept)
-        btn_row.addWidget(close_btn)
-        fl.addRow(btn_row)
-        dlg.exec()
-
-    def _do_import(self):
-        if not self._parsed:
-            return
-        valid = [d for d in self._parsed if not d["_errors"]]
-        if not valid:
-            QMessageBox.warning(self, "提示", "没有有效数据可导入")
-            return
-        vol = self.volume_input.text().strip()
-        commands = []
-        for d in valid:
-            cmd = self._gen_command(d, vol)
-            commands.append(cmd)
-        self._commands = commands
-        self.accept()
+    # ── Command generation & import ──
 
     def _gen_command(self, d, volume):
         name = d["container_name"]
@@ -1832,7 +1940,7 @@ class BatchImportDialog(QDialog):
         restart = d.get("restart") or "always"
 
         cmd = "docker run -tid"
-        cmd += f" -e \"container=docker\""
+        cmd += " -e \"container=docker\""
         cmd += f" --name {name} --hostname {hostname}"
         cmd += " --privileged"
         cmd += f" --restart {restart}"
@@ -1862,7 +1970,6 @@ class BatchImportDialog(QDialog):
 
         cmd += f" {image} /usr/sbin/init"
 
-        # Extra NICs via network connect
         parts = [cmd]
         for suffix in ("2", "3"):
             n = d.get(f"network{suffix}_name", "")
@@ -1877,6 +1984,25 @@ class BatchImportDialog(QDialog):
                 parts.append(nc)
 
         return " && ".join(parts)
+
+    def _do_import(self):
+        if not self._parsed:
+            return
+        valid = []
+        for i, d in enumerate(self._parsed):
+            item = self.preview.item(i, 0)
+            if item and item.checkState() == Qt.Checked and not d.get("_errors", []):
+                valid.append(d)
+        if not valid:
+            QMessageBox.warning(self, "提示", "没有勾选的有效数据可导入")
+            return
+        vol = self.volume_input.text().strip()
+        commands = []
+        for d in valid:
+            cmd = self._gen_command(d, vol)
+            commands.append(cmd)
+        self._commands = commands
+        self.accept()
 
     def get_commands(self):
         return self._commands
@@ -2393,6 +2519,9 @@ class DockerManager(QWidget):
         self._export_progress_dlg = None
         self._load_progress_dlg = None
 
+        self._hosts_file = os.path.join(os.path.dirname(__file__), "config", "docker_hosts.json")
+        self._hosts = self._load_hosts()
+
         self.setStyleSheet("QWidget { font-family: 'Microsoft YaHei', 'Segoe UI', sans-serif; }")
         self._setup_ui()
         self._action_buttons = [
@@ -2440,42 +2569,28 @@ class DockerManager(QWidget):
         bar.setStyleSheet("QFrame { background: white; border-bottom: 1px solid #dfe6e9; }")
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(16, 10, 16, 10)
-        layout.setSpacing(10)
+        layout.setSpacing(8)
 
         layout.addWidget(QLabel("🔗"))
         layout.addWidget(QLabel("主机:"))
-        self.host_input = QLineEdit()
-        self.host_input.setPlaceholderText("192.168.1.100")
-        self.host_input.setFixedWidth(140)
-        self.host_input.setStyleSheet(STYLE_INPUT_FLAT)
-        layout.addWidget(self.host_input)
 
-        layout.addWidget(QLabel("端口:"))
-        self.port_input = QLineEdit()
-        self.port_input.setPlaceholderText("22")
-        self.port_input.setText("22")
-        self.port_input.setFixedWidth(60)
-        self.port_input.setStyleSheet(STYLE_INPUT_FLAT)
-        from PySide6.QtGui import QRegularExpressionValidator
-        from PySide6.QtCore import QRegularExpression
-        self.port_input.setValidator(
-            QRegularExpressionValidator(QRegularExpression("^[1-9]\\d{0,4}$")))
-        layout.addWidget(self.port_input)
+        self.host_combo = QComboBox()
+        self.host_combo.setMinimumWidth(280)
+        self.host_combo.setStyleSheet(
+            STYLE_INPUT_FLAT + "\n"
+            "QComboBox QAbstractItemView {"
+            "  background: white; color: #1a1a1a; selection-background-color: #e8f0fe; selection-color: #1a1a1a;"
+            "}")
+        self._refresh_host_combo()
+        layout.addWidget(self.host_combo)
 
-        layout.addWidget(QLabel("用户:"))
-        self.user_input = QLineEdit()
-        self.user_input.setPlaceholderText("root")
-        self.user_input.setFixedWidth(100)
-        self.user_input.setStyleSheet(STYLE_INPUT_FLAT)
-        layout.addWidget(self.user_input)
-
-        layout.addWidget(QLabel("密码:"))
-        self.pwd_input = QLineEdit()
-        self.pwd_input.setPlaceholderText("密码")
-        self.pwd_input.setEchoMode(QLineEdit.Password)
-        self.pwd_input.setFixedWidth(120)
-        self.pwd_input.setStyleSheet(STYLE_INPUT_FLAT)
-        layout.addWidget(self.pwd_input)
+        manage_btn = QPushButton("管理")
+        manage_btn.setStyleSheet(
+            "QPushButton{background:#f8f9fa;color:#636e72;border:1px solid #dfe6e9;"
+            "border-radius:4px;padding:6px 12px;font-size:12px;}"
+            "QPushButton:hover{background:#e8e8e8;}")
+        manage_btn.clicked.connect(self._manage_hosts)
+        layout.addWidget(manage_btn)
 
         self.connect_btn = QPushButton("连接")
         self.connect_btn.setStyleSheet(STYLE_BTN_PRIMARY)
@@ -2495,6 +2610,141 @@ class DockerManager(QWidget):
         layout.addWidget(self.status_indicator)
 
         parent.addWidget(bar)
+
+    def _load_hosts(self):
+        try:
+            if os.path.exists(self._hosts_file):
+                with open(self._hosts_file, encoding="utf-8") as f:
+                    return json.load(f)
+            return []
+        except:
+            return []
+
+    def _save_hosts(self):
+        os.makedirs(os.path.dirname(self._hosts_file), exist_ok=True)
+        with open(self._hosts_file, "w", encoding="utf-8") as f:
+            json.dump(self._hosts, f, ensure_ascii=False, indent=2)
+
+    def _refresh_host_combo(self):
+        self.host_combo.clear()
+        for h in self._hosts:
+            label = f"{h.get('desc','?')} — {h['host']}:{h.get('port',22)} ({h['user']})"
+            self.host_combo.addItem(label)
+
+    def _manage_hosts(self):
+        dlg = QDialog(self)
+        dlg.setWindowTitle("管理主机")
+        dlg.resize(520, 380)
+        layout = QVBoxLayout(dlg)
+
+        # List
+        self._host_list = QListWidget()
+        self._refresh_host_list()
+        layout.addWidget(QLabel("已保存的主机:"))
+        layout.addWidget(self._host_list)
+
+        # Form
+        form = QFormLayout()
+        form.setSpacing(6)
+        ip_edit = QLineEdit(); ip_edit.setPlaceholderText("192.168.1.100")
+        port_edit = QLineEdit("22"); port_edit.setFixedWidth(80)
+        user_edit = QLineEdit("root")
+        pwd_edit = QLineEdit(); pwd_edit.setEchoMode(QLineEdit.Password)
+        desc_edit = QLineEdit(); desc_edit.setPlaceholderText("例如: 北京-核心-01")
+        form.addRow("IP:", ip_edit)
+        p_row = QHBoxLayout(); p_row.addWidget(port_edit); p_row.addStretch()
+        form.addRow("端口:", p_row)
+        form.addRow("用户:", user_edit)
+        form.addRow("密码:", pwd_edit)
+        form.addRow("描述:", desc_edit)
+        layout.addLayout(form)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        add_btn = QPushButton("添加")
+        add_btn.setStyleSheet(STYLE_BTN_PRIMARY)
+        update_btn = QPushButton("更新")
+        update_btn.setStyleSheet(
+            "QPushButton{background:#f0f3f5;color:#5b7a9a;border:1px solid #c8d0d8;"
+            "border-radius:4px;padding:6px 16px;}")
+        del_btn = QPushButton("删除")
+        del_btn.setStyleSheet(STYLE_BTN_DANGER)
+
+        btn_row.addWidget(add_btn)
+        btn_row.addWidget(update_btn)
+        btn_row.addWidget(del_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        # Load selected into form
+        def on_select():
+            row = self._host_list.currentRow()
+            if 0 <= row < len(self._hosts):
+                h = self._hosts[row]
+                ip_edit.setText(h["host"])
+                port_edit.setText(str(h.get("port", 22)))
+                user_edit.setText(h["user"])
+                pwd_edit.setText(h.get("pwd", ""))
+                desc_edit.setText(h.get("desc", ""))
+        self._host_list.currentRowChanged.connect(on_select)
+
+        def on_add():
+            if not ip_edit.text().strip():
+                QMessageBox.warning(dlg, "提示", "请输入IP")
+                return
+            self._hosts.append(dict(
+                host=ip_edit.text().strip(),
+                port=int(port_edit.text().strip() or "22"),
+                user=user_edit.text().strip() or "root",
+                pwd=pwd_edit.text(),
+                desc=desc_edit.text().strip(),
+            ))
+            self._save_hosts()
+            self._refresh_host_list()
+            self._refresh_host_combo()
+            ip_edit.clear(); pwd_edit.clear(); desc_edit.clear()
+            port_edit.setText("22"); user_edit.setText("root")
+        add_btn.clicked.connect(on_add)
+
+        def on_update():
+            row = self._host_list.currentRow()
+            if row < 0:
+                QMessageBox.warning(dlg, "提示", "请先选择要更新的主机")
+                return
+            if not ip_edit.text().strip():
+                QMessageBox.warning(dlg, "提示", "请输入IP")
+                return
+            self._hosts[row] = dict(
+                host=ip_edit.text().strip(),
+                port=int(port_edit.text().strip() or "22"),
+                user=user_edit.text().strip() or "root",
+                pwd=pwd_edit.text(),
+                desc=desc_edit.text().strip(),
+            )
+            self._save_hosts()
+            self._refresh_host_list()
+            self._refresh_host_combo()
+        update_btn.clicked.connect(on_update)
+
+        def on_del():
+            row = self._host_list.currentRow()
+            if row < 0:
+                QMessageBox.warning(dlg, "提示", "请先选择要删除的主机")
+                return
+            if QMessageBox.question(dlg, "确认", f"删除 {self._hosts[row]['host']}?") == QMessageBox.Yes:
+                self._hosts.pop(row)
+                self._save_hosts()
+                self._refresh_host_list()
+                self._refresh_host_combo()
+        del_btn.clicked.connect(on_del)
+
+        dlg.exec()
+
+    def _refresh_host_list(self):
+        if hasattr(self, '_host_list'):
+            self._host_list.clear()
+            for h in self._hosts:
+                self._host_list.addItem(f"{h.get('desc','?')} — {h['host']}:{h.get('port',22)} ({h['user']})")
 
     def _build_home_page(self):
         page = QScrollArea()
@@ -2574,7 +2824,7 @@ class DockerManager(QWidget):
         svc_ly.setSpacing(4)
         svc_ly.addWidget(QLabel("⚙ Docker服务:"))
         self.service_buttons = []
-        for text, bg, hover, action in [("▶ 启动","#27ae60","#219a52","start"),("⏹ 停止","#d63031","#c0392b","stop"),("🔄 重启","#f39c12","#e67e22","restart")]:
+        for text, bg, hover, action in [("▶ 启动","#5d8a6a","#4f7a5d","start"),("⏹ 停止","#b85450","#a34945","stop"),("🔄 重启","#c8913a","#b07d33","restart")]:
             btn = QPushButton(text)
             btn.setStyleSheet(f"{STYLE_BTN_CTRL} QPushButton {{ background: {bg}; }} QPushButton:hover {{ background: {hover}; }}")
             btn.clicked.connect(lambda checked, a=action: self._service_action(a))
@@ -2589,7 +2839,7 @@ class DockerManager(QWidget):
         boot_ly.setContentsMargins(10, 4, 10, 4)
         boot_ly.setSpacing(4)
         boot_ly.addWidget(QLabel("🔄 Docker服务开机自启:"))
-        for text, bg, hover, action in [("✓ 启用","#0984e3","#0873c4","enable"),("✕ 禁用","#636e72","#2d3436","disable")]:
+        for text, bg, hover, action in [("✓ 启用","#5b7a9a","#4e6b89","enable"),("✕ 禁用","#6b7a7f","#556168","disable")]:
             btn = QPushButton(text)
             btn.setStyleSheet(f"{STYLE_BTN_CTRL} QPushButton {{ background: {bg}; }} QPushButton:hover {{ background: {hover}; }}")
             btn.clicked.connect(lambda checked, a=action: self._service_action(a))
@@ -2624,21 +2874,21 @@ class DockerManager(QWidget):
         cl.setSpacing(4)
         ADD_STYLE = """
             QPushButton {
-                background: #0984e3; color: white;
+                background: #5b7a9a; color: white;
                 border: none; border-radius: 3px;
                 padding: 3px 12px; font-size: 11px;
             }
-            QPushButton:hover { background: #0873c4; }
-            QPushButton:disabled { background: #b2bec3; }
+            QPushButton:hover { background: #4e6b89; }
+            QPushButton:disabled { background: #c8d0d8; }
         """
         DEL_STYLE = """
             QPushButton {
-                background: transparent; color: #e74c3c;
-                border: 1px solid #e74c3c; border-radius: 3px;
+                background: transparent; color: #b85450;
+                border: 1px solid #b85450; border-radius: 3px;
                 padding: 2px 10px; font-size: 11px;
             }
-            QPushButton:hover { background: #e74c3c; color: white; }
-            QPushButton:disabled { color: #b2bec3; border-color: #b2bec3; }
+            QPushButton:hover { background: #b85450; color: white; }
+            QPushButton:disabled { color: #c8d0d8; border-color: #c8d0d8; }
         """
         self.cont_create_btn = QPushButton("+ 创建容器")
         self.cont_create_btn.setFixedHeight(24)
@@ -2773,13 +3023,15 @@ class DockerManager(QWidget):
             self._do_connect()
 
     def _do_connect(self):
-        host = self.host_input.text().strip()
-        if not host:
-            QMessageBox.warning(self, "提示", "请输入主机IP")
+        idx = self.host_combo.currentIndex()
+        if idx < 0 or idx >= len(self._hosts):
+            QMessageBox.warning(self, "提示", "请先在主机列表中添加目标主机")
             return
-        port = int(self.port_input.text().strip() or "22")
-        user = self.user_input.text().strip() or "root"
-        pwd = self.pwd_input.text()
+        h = self._hosts[idx]
+        host = h["host"]
+        port = int(h.get("port", 22))
+        user = h.get("user", "root")
+        pwd = h.get("pwd", "")
 
         self.ssh_params = (host, port, user, pwd)
         self.connect_btn.setEnabled(False)
@@ -3009,6 +3261,7 @@ class DockerManager(QWidget):
         dlg = BatchImportDialog(self,
             existing_names=existing_names,
             existing_ips=list(existing_ips),
+            config_path=self._hosts_file.replace("docker_hosts.json", "docker_batch_config.json"),
         )
         if dlg.exec() == QDialog.Accepted:
             cmds = dlg.get_commands()

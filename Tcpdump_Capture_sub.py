@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import sys, os, json, logging, time
+import sys, os, json, logging, time, subprocess, platform
 from datetime import datetime
 
 import paramiko
@@ -7,13 +7,14 @@ from scp import SCPClient
 
 from PySide6.QtWidgets import (QWidget, QApplication, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QCheckBox, QTextEdit, QFileDialog,
-    QMessageBox, QGroupBox, QComboBox, QFormLayout, QFrame, QProgressBar)
-from PySide6.QtCore import QThread, Signal, Qt, QTimer
+    QMessageBox, QGroupBox, QComboBox, QFormLayout, QFrame, QProgressBar,
+    QInputDialog, QCompleter)
+from PySide6.QtCore import QThread, Signal, Qt, QTimer, QEvent
 from PySide6.QtGui import QFont
 
 logger = logging.getLogger(__name__)
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
 
 XIAOMI_SS = """
     TcpdumpCapture {
@@ -197,12 +198,131 @@ class CaptureWorker(QThread):
             logger.exception("CaptureWorker error")
 
 
+class PingCheckWorker(QThread):
+    result = Signal(bool)
+
+    def __init__(self, host, parent=None):
+        super().__init__(parent)
+        self.host = host
+
+    def run(self):
+        try:
+            param = "-n" if platform.system().lower() == "windows" else "-c"
+            kwargs = {"capture_output": True, "timeout": 5}
+            if platform.system().lower() == "windows":
+                kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+            r = subprocess.run(["ping", param, "1", "-w", "2000", self.host], **kwargs)
+            self.result.emit(r.returncode == 0)
+        except:
+            self.result.emit(False)
+
+
+class CaptureStartWorker(QThread):
+    started = Signal()
+    error = Signal(str)
+
+    def __init__(self, host, port, user, pwd, cmd):
+        super().__init__()
+        self.host = host
+        self.port = int(port)
+        self.user = user
+        self.pwd = pwd
+        self.cmd = cmd
+
+    def _ssh(self):
+        c = paramiko.SSHClient()
+        c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        c.connect(self.host, self.port, self.user, self.pwd, timeout=10)
+        return c
+
+    def run(self):
+        try:
+            c = self._ssh()
+            chan = c.get_transport().open_session()
+            chan.exec_command(f"mkdir -p /opt/tar && nohup {self.cmd} > /dev/null 2>&1 &")
+            chan.close()
+            c.close()
+            self.started.emit()
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+class CaptureStopWorker(QThread):
+    log = Signal(str)
+    done = Signal(str)
+    error = Signal(str)
+
+    def __init__(self, host, port, user, pwd, remote_path, local_path, compress=True):
+        super().__init__()
+        self.host = host
+        self.port = int(port)
+        self.user = user
+        self.pwd = pwd
+        self.remote_path = remote_path
+        self.local_path = local_path
+        self.compress = compress
+
+    def _ssh(self):
+        c = paramiko.SSHClient()
+        c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        c.connect(self.host, self.port, self.user, self.pwd, timeout=10)
+        return c
+
+    def run(self):
+        try:
+            self.log.emit("[tcpdump] 停止抓包")
+            c = self._ssh()
+            chan = c.get_transport().open_session()
+            chan.exec_command("killall tcpdump 2>/dev/null; pkill tcpdump 2>/dev/null; pgrep tcpdump | xargs -r kill 2>/dev/null; sleep 2")
+            chan.close()
+            c.close()
+
+            c = self._ssh()
+            chan = c.get_transport().open_session()
+            chan.exec_command(f"test -f {self.remote_path} && echo OK || echo MISSING")
+            out = chan.makefile("rb", -1).read().decode().strip()
+            chan.close()
+            c.close()
+            if out != "OK":
+                raise RuntimeError(f"文件不存在: {self.remote_path}")
+
+            dl_path = self.remote_path
+            dl_local = self.local_path
+            if self.compress:
+                gz_path = self.remote_path + ".gz"
+                self.log.emit(f"[压缩] gzip {self.remote_path}")
+                c = self._ssh()
+                chan = c.get_transport().open_session()
+                chan.exec_command(f"gzip -f {self.remote_path}")
+                chan.close()
+                c.close()
+                dl_path = gz_path
+                dl_local = self.local_path + ".gz"
+
+            self.log.emit(f"[下载] {dl_path} -> {dl_local}")
+            c = self._ssh()
+            SCPClient(c.get_transport()).get(dl_path, dl_local)
+            c.close()
+
+            c = self._ssh()
+            chan = c.get_transport().open_session()
+            chan.exec_command(f"rm -f {dl_path}")
+            chan.close()
+            c.close()
+
+            self.log.emit(f"[完成] {dl_local}")
+            self.done.emit(dl_local)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class TcpdumpCapture(QWidget):
     def __init__(self):
         super().__init__()
         self._hosts = _load_hosts()
         self._capture_filter = ""
         self._capture_out = ""
+        self._capturing = False
         self._init_ui()
 
     def _card(self, title, content_widget):
@@ -243,15 +363,34 @@ class TcpdumpCapture(QWidget):
         host_row.setSpacing(6)
         self.host_cb = QComboBox()
         self.host_cb.setMinimumWidth(220)
+        self.host_cb.setEditable(True)
+        self.host_cb.setPlaceholderText("选择或输入 user@host:port")
+        self.host_cb.setInsertPolicy(QComboBox.NoInsert)
         for h in self._hosts:
-            self.host_cb.addItem(f"{h['user']}@{h['host']}:{h.get('port',22)}", h)
+            self.host_cb.addItem(h['name'], h)
+        self.host_cb.lineEdit().installEventFilter(self)
+        self.host_cb.currentIndexChanged.connect(self._on_host_selected)
+        completer = QCompleter([self.host_cb.itemText(i) for i in range(self.host_cb.count())])
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchContains)
+        self.host_cb.setCompleter(completer)
         host_label = QLabel("主机")
         host_label.setStyleSheet("font-size:13px;font-weight:500;color:#1a1a1a;")
         host_row.addWidget(host_label)
         host_row.addWidget(self.host_cb)
-        self.status_lbl = QLabel("⬤  未连接")
-        self.status_lbl.setStyleSheet("font-size:12px;color:#999;")
-        host_row.addWidget(self.status_lbl)
+        self.reach_indicator = QLabel()
+        self.reach_indicator.setFixedSize(14, 14)
+        host_row.addWidget(self.reach_indicator)
+        self.reach_text = QLabel("检测中...")
+        self.reach_text.setStyleSheet("font-size:12px;color:#999;")
+        host_row.addWidget(self.reach_text)
+        save_btn = QPushButton("保存")
+        save_btn.setStyleSheet(
+            "QPushButton{background:#ff6900;color:white;border:none;border-radius:6px;"
+            "padding:4px 12px;font-size:11px;font-weight:600;}"
+            "QPushButton:hover{background:#e55e00;}")
+        save_btn.clicked.connect(self._save_current_host)
+        host_row.addWidget(save_btn)
         host_row.addStretch()
         layout.addLayout(host_row)
 
@@ -341,9 +480,18 @@ class TcpdumpCapture(QWidget):
         action_row = QHBoxLayout()
         action_row.setSpacing(6)
 
-        dur_label = QLabel("抓取时长")
-        dur_label.setStyleSheet("font-size:12px;color:#1a1a1a;")
-        action_row.addWidget(dur_label)
+        mode_label = QLabel("模式")
+        mode_label.setStyleSheet("font-size:12px;color:#1a1a1a;")
+        action_row.addWidget(mode_label)
+        self.mode_cb = QComboBox()
+        self.mode_cb.addItems(["手动", "定时"])
+        self.mode_cb.setFixedWidth(100)
+        self.mode_cb.currentIndexChanged.connect(self._on_mode_changed)
+        action_row.addWidget(self.mode_cb)
+
+        self.dur_label = QLabel("抓取时长")
+        self.dur_label.setStyleSheet("font-size:12px;color:#1a1a1a;")
+        action_row.addWidget(self.dur_label)
         self.duration_input = QLineEdit("30")
         self.duration_input.setFixedWidth(50)
         self.duration_input.setAlignment(Qt.AlignCenter)
@@ -357,14 +505,24 @@ class TcpdumpCapture(QWidget):
 
         action_row.addStretch()
 
-        self.start_btn = QPushButton("开始抓包并下载")
+        self.start_btn = QPushButton("开始")
         self.start_btn.setStyleSheet(
-            "QPushButton{background:#ff6900;color:white;border:none;"
+            "QPushButton{background:#4caf50;color:white;border:none;"
             "border-radius:8px;padding:8px 24px;font-size:13px;font-weight:600;}"
-            "QPushButton:hover{background:#e55e00;}"
-            "QPushButton:disabled{background:#f5d5c0;color:white;}")
+            "QPushButton:hover{background:#388e3c;}"
+            "QPushButton:disabled{background:#c8e6c9;color:white;}")
         self.start_btn.clicked.connect(self._do_start)
         action_row.addWidget(self.start_btn)
+
+        self.stop_btn = QPushButton("停止")
+        self.stop_btn.setStyleSheet(
+            "QPushButton{background:#f44336;color:white;border:none;"
+            "border-radius:8px;padding:8px 24px;font-size:13px;font-weight:600;}"
+            "QPushButton:hover{background:#d32f2f;}"
+            "QPushButton:disabled{background:#ffcdd2;color:white;}")
+        self.stop_btn.clicked.connect(self._do_manual_stop)
+        self.stop_btn.setEnabled(False)
+        action_row.addWidget(self.stop_btn)
 
         layout.addLayout(action_row)
 
@@ -392,7 +550,7 @@ class TcpdumpCapture(QWidget):
         log_v.addWidget(self.log_box)
         layout.addWidget(log_container)
 
-        self._gen_cmd()
+        self._on_host_selected()
 
     def _gen_cmd(self):
         parts = []
@@ -436,6 +594,12 @@ class TcpdumpCapture(QWidget):
             self.save_path.setText(d)
 
     def _do_start(self):
+        if self.mode_cb.currentIndex() == 0:
+            self._do_manual_start()
+        else:
+            self._do_timer_start()
+
+    def _do_timer_start(self):
         idx = self.host_cb.currentIndex()
         if idx < 0 or idx >= len(self._hosts):
             QMessageBox.warning(self, "提示", "请选择目标主机")
@@ -457,10 +621,12 @@ class TcpdumpCapture(QWidget):
 
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
-        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [开始] 连接 {h['host']}:{h.get('port',22)}")
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [定时] 连接 {h['host']}:{h.get('port',22)}")
         self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [命令] {cmd}")
         self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [远程] {remote_path}")
         self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [本地] {local_path}")
+        self._capturing = True
+        self.mode_cb.setEnabled(False)
         self.start_btn.setEnabled(False)
 
         self._worker = CaptureWorker(h["host"], h.get("port", 22), h["user"], h.get("pwd", ""),
@@ -477,13 +643,219 @@ class TcpdumpCapture(QWidget):
 
     def _on_done(self, local_path):
         self.progress_bar.setValue(100)
-        self.status_lbl.setText("完成")
-        self.status_lbl.setStyleSheet("color:#81c784;font-weight:bold;")
         QMessageBox.information(self, "完成", f"抓包文件已保存:\n{local_path}")
+        subprocess.run(['explorer', '/select,', os.path.normpath(local_path)], creationflags=subprocess.CREATE_NO_WINDOW)
 
     def _on_worker_finished(self):
-        self.start_btn.setEnabled(True)
+        self._capturing = False
+        self.mode_cb.setEnabled(True)
+        if self.mode_cb.currentIndex() == 0:
+            self._on_mode_changed(0)
+        else:
+            self.progress_bar.setVisible(False)
+            self._on_mode_changed(1)
         self._worker = None
+
+    # ── Manual Mode ──
+
+    def _on_mode_changed(self, idx):
+        self._gen_cmd()
+        if idx == 0:
+            self.dur_label.setVisible(False)
+            self.duration_input.setVisible(False)
+            self.duration_unit.setVisible(False)
+            self.start_btn.setText("开始")
+            self.start_btn.setStyleSheet(
+                "QPushButton{background:#4caf50;color:white;border:none;"
+                "border-radius:8px;padding:8px 24px;font-size:13px;font-weight:600;}"
+                "QPushButton:hover{background:#388e3c;}"
+                "QPushButton:disabled{background:#c8e6c9;color:white;}")
+            self.start_btn.setEnabled(True)
+            self.start_btn.setVisible(True)
+            self.stop_btn.setEnabled(False)
+            self.stop_btn.setVisible(True)
+        else:
+            self.dur_label.setVisible(True)
+            self.duration_input.setVisible(True)
+            self.duration_unit.setVisible(True)
+            self.start_btn.setText("开始抓包并下载")
+            self.start_btn.setStyleSheet(
+                "QPushButton{background:#ff6900;color:white;border:none;"
+                "border-radius:8px;padding:8px 24px;font-size:13px;font-weight:600;}"
+                "QPushButton:hover{background:#e55e00;}"
+                "QPushButton:disabled{background:#f5d5c0;color:white;}")
+            self.start_btn.setEnabled(True)
+            self.start_btn.setVisible(True)
+            self.stop_btn.setEnabled(False)
+            self.stop_btn.setVisible(False)
+        if not self._capturing:
+            self._check_reachability()
+
+    def _do_manual_start(self):
+        idx = self.host_cb.currentIndex()
+        if idx < 0 or idx >= len(self._hosts):
+            QMessageBox.warning(self, "提示", "请选择目标主机")
+            return
+        h = self._hosts[idx]
+        save_dir = self.save_path.text().strip()
+        if not save_dir:
+            QMessageBox.warning(self, "提示", "请选择本地保存目录")
+            return
+        self._gen_cmd()
+        out_name = self._capture_out
+        remote_path = f"/opt/tar/{out_name}"
+        local_path = os.path.join(save_dir, out_name)
+        filter_expr = self._capture_filter
+        cmd = f"tcpdump -i any -w {remote_path} {filter_expr}"
+
+        self._manual_local_path = local_path
+        self._manual_remote_path = remote_path
+
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [手动] 开始抓包 {h['host']}:{h.get('port',22)}")
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [命令] {cmd}")
+        self._capturing = True
+        self.mode_cb.setEnabled(False)
+        self.start_btn.setEnabled(False)
+        self.stop_btn.setEnabled(True)
+
+        self._start_worker = CaptureStartWorker(h["host"], h.get("port", 22), h["user"], h.get("pwd", ""), cmd)
+        self._start_worker.started.connect(self._on_manual_started)
+        self._start_worker.error.connect(self._on_manual_error)
+        self._start_worker.finished.connect(lambda: setattr(self, '_start_worker', None))
+        self._start_worker.start()
+
+    def _on_manual_started(self):
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [手动] 抓包已启动，点击停止结束")
+
+    def _on_manual_error(self, msg):
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [错误] {msg}")
+        self._capturing = False
+        self.mode_cb.setEnabled(True)
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+
+    def _do_manual_stop(self):
+        idx = self.host_cb.currentIndex()
+        if idx < 0 or idx >= len(self._hosts):
+            return
+        h = self._hosts[idx]
+        self.stop_btn.setEnabled(False)
+        self.start_btn.setEnabled(False)
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [手动] 停止抓包并下载")
+
+        self._stop_worker = CaptureStopWorker(
+            h["host"], h.get("port", 22), h["user"], h.get("pwd", ""),
+            self._manual_remote_path, self._manual_local_path, self.compress_cb.isChecked())
+        self._stop_worker.log.connect(self._on_log)
+        self._stop_worker.done.connect(self._on_manual_stopped)
+        self._stop_worker.error.connect(self._on_manual_stop_error)
+        self._stop_worker.finished.connect(lambda: setattr(self, '_stop_worker', None))
+        self._stop_worker.start()
+
+    def _on_manual_stopped(self, local_path):
+        self._on_done(local_path)
+        self._capturing = False
+        self.mode_cb.setEnabled(True)
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+
+    def _on_manual_stop_error(self, msg):
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [错误] {msg}")
+        self._capturing = False
+        self.mode_cb.setEnabled(True)
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)
+
+    # ── Host Management ──
+
+    def eventFilter(self, obj, event):
+        if obj == self.host_cb.lineEdit() and event.type() == QEvent.Type.MouseButtonPress:
+            self.host_cb.showPopup()
+        return super().eventFilter(obj, event)
+
+    def _on_host_selected(self):
+        self._gen_cmd()
+        self._check_reachability()
+
+    def _check_reachability(self, host=None):
+        if getattr(self, '_ping_worker', None) is not None:
+            self._ping_worker.quit()
+            self._ping_worker.wait()
+            self._ping_worker = None
+        if host is None:
+            idx = self.host_cb.currentIndex()
+            if idx < 0 or idx >= len(self._hosts):
+                self._set_reach("未知", "#999")
+                return
+            host = self._hosts[idx]["host"]
+        self._set_reach("检测中...", "#fdd835")
+        self._ping_worker = PingCheckWorker(host)
+        self._ping_worker.result.connect(self._on_ping_result)
+        self._ping_worker.finished.connect(lambda: setattr(self, '_ping_worker', None))
+        self._ping_worker.start()
+
+    def _on_ping_result(self, alive):
+        if alive:
+            self._set_reach("可达", "#4caf50")
+        else:
+            self._set_reach("不可达", "#f44336")
+
+    def _set_reach(self, text, color):
+        self.reach_indicator.setStyleSheet(
+            f"background:{color};border-radius:7px;")
+        self.reach_text.setText(text)
+        self.reach_text.setStyleSheet(
+            f"font-size:12px;color:{color};font-weight:bold;" if color != "#999"
+            else "font-size:12px;color:#999;")
+
+    def _save_current_host(self):
+        text = self.host_cb.currentText().strip()
+        if not text:
+            return
+        display = [self.host_cb.itemText(i) for i in range(self.host_cb.count())]
+        if text in display:
+            return
+        parts = text.split("@")
+        if len(parts) == 2:
+            user = parts[0]
+            hp = parts[1].split(":")
+            host = hp[0]
+            port = int(hp[1]) if len(hp) > 1 else 22
+        else:
+            hp = text.split(":")
+            host = hp[0]
+            port = int(hp[1]) if len(hp) > 1 else 22
+            user = "root"
+        if not host:
+            QMessageBox.warning(self, "格式错误", "主机格式: user@host:port 或 host")
+            return
+        pwd, ok = QInputDialog.getText(self, "密码", f"输入 {user}@{host} 的密码:", QLineEdit.EchoMode.Password)
+        if not ok:
+            return
+        entry = {"host": host, "port": port, "user": user, "pwd": pwd, "name": host}
+        self._hosts.append(entry)
+        cfg = os.path.join(BASE_DIR, "config", "hosts.json")
+        try:
+            with open(cfg, "w", encoding="utf-8") as f:
+                json.dump(self._hosts, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            QMessageBox.warning(self, "保存失败", str(e))
+            self._hosts.pop()
+            return
+        self._reload_hosts()
+        self.host_cb.setCurrentIndex(self.host_cb.count() - 1)
+        self._on_host_selected()
+
+    def _reload_hosts(self):
+        self.host_cb.blockSignals(True)
+        self.host_cb.clear()
+        for h in self._hosts:
+            self.host_cb.addItem(h['name'], h)
+        self.host_cb.blockSignals(False)
+        completer = QCompleter([self.host_cb.itemText(i) for i in range(self.host_cb.count())])
+        completer.setCaseSensitivity(Qt.CaseInsensitive)
+        completer.setFilterMode(Qt.MatchContains)
+        self.host_cb.setCompleter(completer)
 
 
 if __name__ == "__main__":
