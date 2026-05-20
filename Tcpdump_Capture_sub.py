@@ -159,42 +159,42 @@ class CaptureWorker(QThread):
 
     def run(self):
         try:
-            self.log.emit(f"[tcpdump] 执行: {self.cmd}")
+            self.log.emit(f"[tcpdump] Execute: {self.cmd}")
             self._ssh_exec("mkdir -p /opt/tar")
             self._ssh_nohup(f"nohup {self.cmd} > /dev/null 2>&1 &")
-            self.log.emit(f"[tcpdump] 开始抓包 {self.duration} 秒...")
+            self.log.emit(f"[tcpdump] Capturing {self.duration}s ...")
             for i in range(self.duration):
                 time.sleep(1)
                 self.progress.emit(int((i + 1) * 100 / self.duration))
-            self.log.emit(f"[tcpdump] 停止抓包")
+            self.log.emit(f"[tcpdump] Stopping capture")
             self._ssh_exec("killall tcpdump 2>/dev/null; pkill tcpdump 2>/dev/null; pgrep tcpdump | xargs -r kill 2>/dev/null; sleep 2")
-            self.log.emit(f"[tcpdump] 抓包完成: {self.remote_path}")
+            self.log.emit(f"[tcpdump] Capture done: {self.remote_path}")
 
             out, err = self._ssh_exec(f"test -f {self.remote_path} && echo OK || echo MISSING")
             if out != "OK":
                 out2, _ = self._ssh_exec("which tcpdump")
                 out3, _ = self._ssh_exec("ls -la /opt/tar/ 2>&1; tcpdump --version 2>&1")
-                raise RuntimeError(f"文件不存在!\n检查 tcpdump: {out2}\n/opt/tar/: {out3}")
+                raise RuntimeError(f"File not found!\nCheck tcpdump: {out2}\n/opt/tar/: {out3}")
 
             dl_path = self.remote_path
             dl_local = self.local_path
             if self.compress:
                 gz_path = self.remote_path + ".gz"
-                self.log.emit(f"[压缩] gzip {self.remote_path}")
+                self.log.emit(f"[compress] gzip {self.remote_path}")
                 self._ssh_exec(f"gzip -f {self.remote_path}", timeout=120)
-                self.log.emit(f"[压缩] 完成: {gz_path}")
+                self.log.emit(f"[compress] Done: {gz_path}")
                 dl_path = gz_path
                 dl_local = self.local_path + ".gz"
 
-            self.log.emit(f"[下载] 开始传输: {dl_path} -> {dl_local}")
+            self.log.emit(f"[download] Transfer: {dl_path} -> {dl_local}")
             c = self._ssh()
             SCPClient(c.get_transport()).get(dl_path, dl_local)
             c.close()
             self._ssh_nohup(f"rm -f {dl_path}")
-            self.log.emit(f"[完成] 文件已保存: {dl_local}")
+            self.log.emit(f"[done] Saved: {dl_local}")
             self.done.emit(dl_local)
         except Exception as e:
-            self.log.emit(f"[错误] {e}")
+            self.log.emit(f"[error] {e}")
             logger.exception("CaptureWorker error")
 
 
@@ -270,7 +270,7 @@ class CaptureStopWorker(QThread):
 
     def run(self):
         try:
-            self.log.emit("[tcpdump] 停止抓包")
+            self.log.emit("[tcpdump] Stopping capture")
             c = self._ssh()
             chan = c.get_transport().open_session()
             chan.exec_command("killall tcpdump 2>/dev/null; pkill tcpdump 2>/dev/null; pgrep tcpdump | xargs -r kill 2>/dev/null; sleep 2")
@@ -284,13 +284,13 @@ class CaptureStopWorker(QThread):
             chan.close()
             c.close()
             if out != "OK":
-                raise RuntimeError(f"文件不存在: {self.remote_path}")
+                raise RuntimeError(f"File not found: {self.remote_path}")
 
             dl_path = self.remote_path
             dl_local = self.local_path
             if self.compress:
                 gz_path = self.remote_path + ".gz"
-                self.log.emit(f"[压缩] gzip {self.remote_path}")
+                self.log.emit(f"[compress] gzip {self.remote_path}")
                 c = self._ssh()
                 chan = c.get_transport().open_session()
                 chan.exec_command(f"gzip -f {self.remote_path}")
@@ -299,7 +299,7 @@ class CaptureStopWorker(QThread):
                 dl_path = gz_path
                 dl_local = self.local_path + ".gz"
 
-            self.log.emit(f"[下载] {dl_path} -> {dl_local}")
+            self.log.emit(f"[download] {dl_path} -> {dl_local}")
             c = self._ssh()
             SCPClient(c.get_transport()).get(dl_path, dl_local)
             c.close()
@@ -310,7 +310,7 @@ class CaptureStopWorker(QThread):
             chan.close()
             c.close()
 
-            self.log.emit(f"[完成] {dl_local}")
+            self.log.emit(f"[done] {dl_local}")
             self.done.emit(dl_local)
         except Exception as e:
             self.error.emit(str(e))
@@ -350,7 +350,7 @@ class TcpdumpCapture(QWidget):
         return btn
 
     def _init_ui(self):
-        self.setWindowTitle("远程抓包工具")
+        self.setWindowTitle("Remote Packet Capture")
         self.resize(780, 700)
         self.setStyleSheet(XIAOMI_SS)
 
@@ -364,7 +364,7 @@ class TcpdumpCapture(QWidget):
         self.host_cb = QComboBox()
         self.host_cb.setMinimumWidth(220)
         self.host_cb.setEditable(True)
-        self.host_cb.setPlaceholderText("选择或输入 user@host:port")
+        self.host_cb.setPlaceholderText("Select or type user@host:port")
         self.host_cb.setInsertPolicy(QComboBox.NoInsert)
         for h in self._hosts:
             self.host_cb.addItem(h['name'], h)
@@ -374,17 +374,17 @@ class TcpdumpCapture(QWidget):
         completer.setCaseSensitivity(Qt.CaseInsensitive)
         completer.setFilterMode(Qt.MatchContains)
         self.host_cb.setCompleter(completer)
-        host_label = QLabel("主机")
+        host_label = QLabel("Host")
         host_label.setStyleSheet("font-size:13px;font-weight:500;color:#1a1a1a;")
         host_row.addWidget(host_label)
         host_row.addWidget(self.host_cb)
         self.reach_indicator = QLabel()
         self.reach_indicator.setFixedSize(14, 14)
         host_row.addWidget(self.reach_indicator)
-        self.reach_text = QLabel("检测中...")
+        self.reach_text = QLabel("Checking...")
         self.reach_text.setStyleSheet("font-size:12px;color:#999;")
         host_row.addWidget(self.reach_text)
-        save_btn = QPushButton("保存")
+        save_btn = QPushButton("Save")
         save_btn.setStyleSheet(
             "QPushButton{background:#ff6900;color:white;border:none;border-radius:6px;"
             "padding:4px 12px;font-size:11px;font-weight:600;}"
@@ -404,12 +404,12 @@ class TcpdumpCapture(QWidget):
         self.capture_proto = QComboBox()
         self.capture_proto.addItems(["any", "tcp", "udp", "icmp", "arp", "sip"])
         self.capture_proto.currentTextChanged.connect(self._gen_cmd)
-        f.addRow("协议", self.capture_proto)
+        f.addRow("Protocol", self.capture_proto)
 
         ip_row = QHBoxLayout()
         ip_row.setSpacing(6)
         self.capture_src_ip = QLineEdit()
-        self.capture_src_ip.setPlaceholderText("源 IP")
+        self.capture_src_ip.setPlaceholderText("Src IP")
         self.capture_src_ip.setFixedWidth(160)
         self.capture_src_ip.textChanged.connect(self._gen_cmd)
         ip_row.addWidget(self.capture_src_ip)
@@ -417,7 +417,7 @@ class TcpdumpCapture(QWidget):
         arrow.setStyleSheet("color:#ccc;font-size:14px;")
         ip_row.addWidget(arrow)
         self.capture_dst_ip = QLineEdit()
-        self.capture_dst_ip.setPlaceholderText("目标 IP")
+        self.capture_dst_ip.setPlaceholderText("Dst IP")
         self.capture_dst_ip.setFixedWidth(160)
         self.capture_dst_ip.textChanged.connect(self._gen_cmd)
         ip_row.addWidget(self.capture_dst_ip)
@@ -427,7 +427,7 @@ class TcpdumpCapture(QWidget):
         port_row = QHBoxLayout()
         port_row.setSpacing(6)
         self.capture_src_port = QLineEdit()
-        self.capture_src_port.setPlaceholderText("源")
+        self.capture_src_port.setPlaceholderText("Src")
         self.capture_src_port.setFixedWidth(90)
         self.capture_src_port.textChanged.connect(self._gen_cmd)
         port_row.addWidget(self.capture_src_port)
@@ -435,14 +435,14 @@ class TcpdumpCapture(QWidget):
         arrow2.setStyleSheet("color:#ccc;font-size:14px;")
         port_row.addWidget(arrow2)
         self.capture_dst_port = QLineEdit()
-        self.capture_dst_port.setPlaceholderText("目标")
+        self.capture_dst_port.setPlaceholderText("Dst")
         self.capture_dst_port.setFixedWidth(90)
         self.capture_dst_port.textChanged.connect(self._gen_cmd)
         port_row.addWidget(self.capture_dst_port)
         port_row.addStretch()
-        f.addRow("端口", port_row)
+        f.addRow("Port", port_row)
 
-        self.direction_cb = QCheckBox("区分方向")
+        self.direction_cb = QCheckBox("Directional")
         self.direction_cb.setChecked(False)
         self.direction_cb.toggled.connect(self._gen_cmd)
         f.addRow("", self.direction_cb)
@@ -459,19 +459,19 @@ class TcpdumpCapture(QWidget):
             "padding:8px 12px;font-family:Menlo,'Consolas',monospace;font-size:11px;color:#1a1a1a;}")
         f.addRow("", self.cmd_preview)
 
-        layout.addWidget(self._card("过滤条件", filter_widget))
+        layout.addWidget(self._card("Filter", filter_widget))
 
         # ── Save Path Row ──
         path_row = QHBoxLayout()
         path_row.setSpacing(6)
         self.save_path = QLineEdit()
-        self.save_path.setPlaceholderText("保存路径")
+        self.save_path.setPlaceholderText("Save Path")
         self.save_path.setText(r"F:\BaiduNetdiskDownload\Bangladesh\ICX_BTCL\ANS")
         path_row.addWidget(self.save_path)
-        browse_btn = self._secondary_btn("浏览")
+        browse_btn = self._secondary_btn("Browse")
         browse_btn.clicked.connect(self._on_browse)
         path_row.addWidget(browse_btn)
-        self.compress_cb = QCheckBox("压缩")
+        self.compress_cb = QCheckBox("Compress")
         self.compress_cb.setChecked(False)
         path_row.addWidget(self.compress_cb)
         layout.addLayout(path_row)
@@ -480,16 +480,16 @@ class TcpdumpCapture(QWidget):
         action_row = QHBoxLayout()
         action_row.setSpacing(6)
 
-        mode_label = QLabel("模式")
+        mode_label = QLabel("Mode")
         mode_label.setStyleSheet("font-size:12px;color:#1a1a1a;")
         action_row.addWidget(mode_label)
         self.mode_cb = QComboBox()
-        self.mode_cb.addItems(["手动", "定时"])
+        self.mode_cb.addItems(["Manual", "Timed"])
         self.mode_cb.setFixedWidth(100)
         self.mode_cb.currentIndexChanged.connect(self._on_mode_changed)
         action_row.addWidget(self.mode_cb)
 
-        self.dur_label = QLabel("抓取时长")
+        self.dur_label = QLabel("Duration")
         self.dur_label.setStyleSheet("font-size:12px;color:#1a1a1a;")
         action_row.addWidget(self.dur_label)
         self.duration_input = QLineEdit("30")
@@ -498,14 +498,14 @@ class TcpdumpCapture(QWidget):
         self.duration_input.textChanged.connect(self._gen_cmd)
         action_row.addWidget(self.duration_input)
         self.duration_unit = QComboBox()
-        self.duration_unit.addItems(["秒", "分"])
+        self.duration_unit.addItems(["sec", "min"])
         self.duration_unit.setFixedWidth(70)
         self.duration_unit.currentTextChanged.connect(self._gen_cmd)
         action_row.addWidget(self.duration_unit)
 
         action_row.addStretch()
 
-        self.start_btn = QPushButton("开始")
+        self.start_btn = QPushButton("Start")
         self.start_btn.setStyleSheet(
             "QPushButton{background:#4caf50;color:white;border:none;"
             "border-radius:8px;padding:8px 24px;font-size:13px;font-weight:600;}"
@@ -514,7 +514,7 @@ class TcpdumpCapture(QWidget):
         self.start_btn.clicked.connect(self._do_start)
         action_row.addWidget(self.start_btn)
 
-        self.stop_btn = QPushButton("停止")
+        self.stop_btn = QPushButton("Stop")
         self.stop_btn.setStyleSheet(
             "QPushButton{background:#f44336;color:white;border:none;"
             "border-radius:8px;padding:8px 24px;font-size:13px;font-weight:600;}"
@@ -533,7 +533,7 @@ class TcpdumpCapture(QWidget):
         layout.addWidget(self.progress_bar)
 
         # ── Log ──
-        layout.addWidget(QLabel("日志"))
+        layout.addWidget(QLabel("Log"))
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
         self.log_box.setFont(QFont("Menlo", 10) if "Menlo" in QFont().families() else QFont("Consolas", 10))
@@ -589,7 +589,7 @@ class TcpdumpCapture(QWidget):
         self.cmd_preview.setText(cmd)
 
     def _on_browse(self):
-        d = QFileDialog.getExistingDirectory(self, "选择保存目录")
+        d = QFileDialog.getExistingDirectory(self, "Select Save Directory")
         if d:
             self.save_path.setText(d)
 
@@ -602,17 +602,17 @@ class TcpdumpCapture(QWidget):
     def _do_timer_start(self):
         idx = self.host_cb.currentIndex()
         if idx < 0 or idx >= len(self._hosts):
-            QMessageBox.warning(self, "提示", "请选择目标主机")
+            QMessageBox.warning(self, "Warning", "Please select a target host")
             return
         h = self._hosts[idx]
         save_dir = self.save_path.text().strip()
         if not save_dir:
-            QMessageBox.warning(self, "提示", "请选择本地保存目录")
+            QMessageBox.warning(self, "Warning", "Please select a local save directory")
             return
         self._gen_cmd()
         raw_dur = self.duration_input.text().strip() or "30"
         unit = self.duration_unit.currentText()
-        duration = str(int(raw_dur) * 60) if unit == "分" else raw_dur
+        duration = str(int(raw_dur) * 60) if unit == "min" else raw_dur
         out_name = self._capture_out
         remote_path = f"/opt/tar/{out_name}"
         local_path = os.path.join(save_dir, out_name)
@@ -621,10 +621,10 @@ class TcpdumpCapture(QWidget):
 
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
-        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [定时] 连接 {h['host']}:{h.get('port',22)}")
-        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [命令] {cmd}")
-        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [远程] {remote_path}")
-        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [本地] {local_path}")
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [timed] Connect {h['host']}:{h.get('port',22)}")
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [command] {cmd}")
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [remote] {remote_path}")
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [local] {local_path}")
         self._capturing = True
         self.mode_cb.setEnabled(False)
         self.start_btn.setEnabled(False)
@@ -643,7 +643,7 @@ class TcpdumpCapture(QWidget):
 
     def _on_done(self, local_path):
         self.progress_bar.setValue(100)
-        QMessageBox.information(self, "完成", f"抓包文件已保存:\n{local_path}")
+        QMessageBox.information(self, "Done", f"Capture file saved:\n{local_path}")
         subprocess.run(['explorer', '/select,', os.path.normpath(local_path)], creationflags=subprocess.CREATE_NO_WINDOW)
 
     def _on_worker_finished(self):
@@ -664,7 +664,7 @@ class TcpdumpCapture(QWidget):
             self.dur_label.setVisible(False)
             self.duration_input.setVisible(False)
             self.duration_unit.setVisible(False)
-            self.start_btn.setText("开始")
+            self.start_btn.setText("Start")
             self.start_btn.setStyleSheet(
                 "QPushButton{background:#4caf50;color:white;border:none;"
                 "border-radius:8px;padding:8px 24px;font-size:13px;font-weight:600;}"
@@ -678,7 +678,7 @@ class TcpdumpCapture(QWidget):
             self.dur_label.setVisible(True)
             self.duration_input.setVisible(True)
             self.duration_unit.setVisible(True)
-            self.start_btn.setText("开始抓包并下载")
+            self.start_btn.setText("Start & Download")
             self.start_btn.setStyleSheet(
                 "QPushButton{background:#ff6900;color:white;border:none;"
                 "border-radius:8px;padding:8px 24px;font-size:13px;font-weight:600;}"
@@ -694,12 +694,12 @@ class TcpdumpCapture(QWidget):
     def _do_manual_start(self):
         idx = self.host_cb.currentIndex()
         if idx < 0 or idx >= len(self._hosts):
-            QMessageBox.warning(self, "提示", "请选择目标主机")
+            QMessageBox.warning(self, "Warning", "Please select a target host")
             return
         h = self._hosts[idx]
         save_dir = self.save_path.text().strip()
         if not save_dir:
-            QMessageBox.warning(self, "提示", "请选择本地保存目录")
+            QMessageBox.warning(self, "Warning", "Please select a local save directory")
             return
         self._gen_cmd()
         out_name = self._capture_out
@@ -711,8 +711,8 @@ class TcpdumpCapture(QWidget):
         self._manual_local_path = local_path
         self._manual_remote_path = remote_path
 
-        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [手动] 开始抓包 {h['host']}:{h.get('port',22)}")
-        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [命令] {cmd}")
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [manual] Start capture {h['host']}:{h.get('port',22)}")
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [command] {cmd}")
         self._capturing = True
         self.mode_cb.setEnabled(False)
         self.start_btn.setEnabled(False)
@@ -725,10 +725,10 @@ class TcpdumpCapture(QWidget):
         self._start_worker.start()
 
     def _on_manual_started(self):
-        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [手动] 抓包已启动，点击停止结束")
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [manual] Capture started, click Stop to finish")
 
     def _on_manual_error(self, msg):
-        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [错误] {msg}")
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [error] {msg}")
         self._capturing = False
         self.mode_cb.setEnabled(True)
         self.start_btn.setEnabled(True)
@@ -741,7 +741,7 @@ class TcpdumpCapture(QWidget):
         h = self._hosts[idx]
         self.stop_btn.setEnabled(False)
         self.start_btn.setEnabled(False)
-        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [手动] 停止抓包并下载")
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [manual] Stop capture & download")
 
         self._stop_worker = CaptureStopWorker(
             h["host"], h.get("port", 22), h["user"], h.get("pwd", ""),
@@ -760,7 +760,7 @@ class TcpdumpCapture(QWidget):
         self.stop_btn.setEnabled(False)
 
     def _on_manual_stop_error(self, msg):
-        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [错误] {msg}")
+        self.log_box.append(f"[{datetime.now().strftime('%H:%M:%S')}] [error] {msg}")
         self._capturing = False
         self.mode_cb.setEnabled(True)
         self.start_btn.setEnabled(True)
@@ -785,10 +785,10 @@ class TcpdumpCapture(QWidget):
         if host is None:
             idx = self.host_cb.currentIndex()
             if idx < 0 or idx >= len(self._hosts):
-                self._set_reach("未知", "#999")
+                self._set_reach("Unknown", "#999")
                 return
             host = self._hosts[idx]["host"]
-        self._set_reach("检测中...", "#fdd835")
+        self._set_reach("Checking...", "#fdd835")
         self._ping_worker = PingCheckWorker(host)
         self._ping_worker.result.connect(self._on_ping_result)
         self._ping_worker.finished.connect(lambda: setattr(self, '_ping_worker', None))
@@ -796,9 +796,9 @@ class TcpdumpCapture(QWidget):
 
     def _on_ping_result(self, alive):
         if alive:
-            self._set_reach("可达", "#4caf50")
+            self._set_reach("Reachable", "#4caf50")
         else:
-            self._set_reach("不可达", "#f44336")
+            self._set_reach("Unreachable", "#f44336")
 
     def _set_reach(self, text, color):
         self.reach_indicator.setStyleSheet(
@@ -827,9 +827,9 @@ class TcpdumpCapture(QWidget):
             port = int(hp[1]) if len(hp) > 1 else 22
             user = "root"
         if not host:
-            QMessageBox.warning(self, "格式错误", "主机格式: user@host:port 或 host")
+            QMessageBox.warning(self, "Format Error", "Format: user@host:port or host")
             return
-        pwd, ok = QInputDialog.getText(self, "密码", f"输入 {user}@{host} 的密码:", QLineEdit.EchoMode.Password)
+        pwd, ok = QInputDialog.getText(self, "Password", f"Enter password for {user}@{host}:", QLineEdit.EchoMode.Password)
         if not ok:
             return
         entry = {"host": host, "port": port, "user": user, "pwd": pwd, "name": host}
@@ -839,7 +839,7 @@ class TcpdumpCapture(QWidget):
             with open(cfg, "w", encoding="utf-8") as f:
                 json.dump(self._hosts, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            QMessageBox.warning(self, "保存失败", str(e))
+            QMessageBox.warning(self, "Save Failed", str(e))
             self._hosts.pop()
             return
         self._reload_hosts()
