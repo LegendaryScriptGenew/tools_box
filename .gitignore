@@ -94,7 +94,8 @@ MANIFEST
 # ====================
 # 日志和数据库
 # ====================
-
+logs/
+output/
 *.log
 *.pid
 *.seed
@@ -153,7 +154,8 @@ $RECYCLE.BIN/
 # ====================
 # 其他常见文件
 # ====================
-
+logs/
+output/
 # 临时文件
 *.tmp
 *.temp
@@ -179,3 +181,7 @@ docker-compose.override.yml
 # 配置文件（如果包含本地路径）
 config.local.*
 *.local.*
+Toolbox_Main.build/
+Toolbox_Main.dist/
+build/
+

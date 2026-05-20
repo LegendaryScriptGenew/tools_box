@@ -170,7 +170,6 @@ if __name__ == "__main__":
         dd.setText(t.get("description", ""))
         lb.setEnabled(True)
 
-
     def do_launch():
         item = tl.currentItem()
         if item is None:
