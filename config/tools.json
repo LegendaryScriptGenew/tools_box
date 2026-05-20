@@ -55,6 +55,20 @@
       "module": "Ping_Scanner_sub",
       "class": "PingScanner",
       "icon": "🌐"
+    },
+    {
+      "name": "远程抓包",
+      "description": "远程tcpdump抓包，支持定时/手动模式，协议/IP/端口过滤，自动压缩下载",
+      "module": "Tcpdump_Capture_sub",
+      "class": "TcpdumpCapture",
+      "icon": "📡"
+    },
+    {
+      "name": "Docker自动化",
+      "description": "远程Docker管理，容器创建/删除/导入/导出，镜像管理，网络管理，批量操作",
+      "module": "Linux_Docker_Tool_sub",
+      "class": "DockerManager",
+      "icon": "🐳"
     }
   ]
 }
