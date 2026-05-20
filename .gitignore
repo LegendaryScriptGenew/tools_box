@@ -1,0 +1,181 @@
+# ====================
+# IDE 和编辑器
+# ====================
+
+# PyCharm
+.idea/
+*.iml
+*.iws
+.ipr
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+*~
+.~*
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# ====================
+# 虚拟环境
+# ====================
+
+venv/
+env/
+.venv/
+.env/
+venv.bak/
+env.bak/
+.venv.bak/
+
+# ====================
+# Python 缓存和编译文件
+# ====================
+
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyz
+*.pyzw
+
+# Cython 编译文件
+*.so
+
+# ====================
+# 测试和覆盖率
+# ====================
+
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+.coveralls.yml
+*.cover
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+
+# ====================
+# 打包和构建
+# ====================
+
+build/
+dist/
+*.egg
+*.egg-info/
+*.egg-info/
+*.whl
+*.tar.gz
+*.tgz
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+develop-eggs/
+.eggs/
+MANIFEST
+
+# ====================
+# 日志和数据库
+# ====================
+
+*.log
+*.pid
+*.seed
+*.pid.lock
+*.sqlite
+*.sqlite3
+*.db
+
+# ====================
+# 环境变量和密钥（重要！不要提交）
+# ====================
+
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.crt
+*.p12
+secrets/
+credentials/
+*.secret
+
+# ====================
+# 操作系统生成的文件
+# ====================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Windows
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+*.directory
+
+# ====================
+# Jupyter Notebook
+# ====================
+
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+.ipynb_checkpoints/
+*.pynb
+
+# ====================
+# 其他常见文件
+# ====================
+
+# 临时文件
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# 压缩文件（一般不用提交）
+*.zip
+*.rar
+*.7z
+
+# 二进制文件
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Docker
+.dockerignore
+docker-compose.override.yml
+
+# 配置文件（如果包含本地路径）
+config.local.*
+*.local.*
