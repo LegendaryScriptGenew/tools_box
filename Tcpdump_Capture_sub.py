@@ -858,7 +858,6 @@ class TcpdumpCapture(QWidget):
         self.host_cb.setCompleter(completer)
 
 
-
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     app = QApplication(sys.argv)
