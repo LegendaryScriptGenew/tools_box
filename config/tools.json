@@ -55,6 +55,13 @@
       "module": "Ping_Scanner_sub",
       "class": "PingScanner",
       "icon": "🌐"
+    },
+    {
+      "name": "IMS网元升级",
+      "description": "IMS系统网元升级工具，支持MGCF/CCF/SCP等网元的停止、备份、上传补丁、解压、配置对比、License恢复、启动等完整升级流程。\n使用说明：\n  1.输入SSH连接信息连接目标主机\n  2.选择网元类型（MGCF/CCF等）\n  3.选择本地补丁文件（tar.gz）\n  4.点击开始升级，程序将按步骤自动执行\n  5.配置文件差异时会弹出对比窗口供用户选择",
+      "module": "IMS_NE_Upgrade_sub",
+      "class": "IMSEUpgradeTool",
+      "icon": "🔄"
     }
   ]
 }

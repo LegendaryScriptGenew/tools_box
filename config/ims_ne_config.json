@@ -1,0 +1,314 @@
+{
+  "MGCF": {
+    "description": "MGCF媒体网关控制功能",
+    "stop": {
+      "method": "script",
+      "user": "root",
+      "commands": [
+        "cd /opt/mswitch/UTEx-BMCF/",
+        "./stop_UTExCS.sh"
+      ],
+      "inputs": {
+        "1": "yes\n"
+      },
+      "process_names": []
+    },
+    "backup": {
+      "user": "root",
+      "base_dir": "/opt/mswitch",
+      "items": [
+        {
+          "source": "UTEx-BMCF",
+          "backup_suffix": "_{date}",
+          "remove_source": true
+        }
+      ]
+    },
+    "patch": {
+      "filename": "UTEx_BGCF_MGCF_MSWITCH7.0_ICX_BMCF_REL_V1.0.0_Linux8.4.tar.gz",
+      "extract_user": "root",
+      "tar_path": "/opt/tar"
+    },
+    "post_extract": null,
+    "config_files": [
+      "/opt/mswitch/UTEx-BMCF/UTExCS.xml",
+      "/opt/mswitch/UTEx-BMCF/switch.cfg"
+    ],
+    "chown": null,
+    "license": {
+      "has_license": true,
+      "file_path": "/opt/mswitch/UTEx-BMCF/license.xml",
+      "user": "root"
+    },
+    "start": {
+      "user": "root",
+      "commands": [
+        "cd /opt/mswitch/UTEx-BMCF/",
+        "nohup ./run_UTExCS.sh &"
+      ]
+    }
+  },
+  "CCF": {
+    "description": "CCF呼叫控制功能",
+    "stop": {
+      "method": "kill",
+      "user": "root",
+      "commands": [],
+      "process_names": ["psc"]
+    },
+    "backup": {
+      "user": "utoss",
+      "base_dir": "/opt/utoss/server",
+      "items": [
+        {
+          "source": "bs",
+          "backup_suffix": "_{date}",
+          "remove_source": true
+        }
+      ]
+    },
+    "patch": {
+      "filename": "PSC_MBOSS7.0_REL_PSC_BL_0001.12_dv_Linux8.4.tar.gz",
+      "extract_user": "root",
+      "tar_path": "/opt/tar"
+    },
+    "post_extract": {
+      "user": "root",
+      "commands": [
+        "cd /opt/utoss/server/bs/bin",
+        "./root8.sh"
+      ]
+    },
+    "config_files": [
+      "/opt/utoss/server/bs/psc_agent/cfg/unix/agent_info.cfg",
+      "/opt/utoss/server/bs/cfg/unix/psc.cfg",
+      "/opt/utoss/server/bs/cfg/unix/ldlib.cfg"
+    ],
+    "chown": {
+      "user": "utoss",
+      "group": "oinstall",
+      "paths": [
+        "/opt/utoss/server/bs/psc_agent/cfg/unix/agent_info.cfg",
+        "/opt/utoss/server/bs/cfg/unix/psc.cfg",
+        "/opt/utoss/server/bs/cfg/unix/ldlib.cfg"
+      ]
+    },
+    "license": {
+      "has_license": false,
+      "file_path": "",
+      "user": ""
+    },
+    "start": {
+      "user": "utoss",
+      "commands": [
+        "cd /opt/utoss/server/bs/bin/",
+        "nohup ./agtpsc.sh &",
+        "WAIT 10",
+        "cd /opt/utoss/server/bs/bin/",
+        "nohup ./tpscagent.sh &"
+      ]
+    }
+  },
+  "XCDR": {
+    "description": "XCDR话单采集功能",
+    "stop": {
+      "method": "script",
+      "user": "root",
+      "commands": [
+        "cd /opt/wacos/xcdr/bin/",
+        "./xcdr_stop.sh"
+      ],
+      "process_names": []
+    },
+    "backup": {
+      "user": "root",
+      "base_dir": "/opt/wacos",
+      "items": [
+        {
+          "source": "xcdr",
+          "backup_suffix": "_{date}",
+          "remove_source": true
+        }
+      ]
+    },
+    "patch": {
+      "filename": "XCDR_*.tar.gz",
+      "extract_user": "root",
+      "tar_path": "/opt/tar"
+    },
+    "post_extract": null,
+    "config_files": [
+      "/opt/wacos/xcdr/cfg/for_Bangladesh.cfg",
+      "/opt/wacos/xcdr/bin/back_raw_cdr.sh"
+    ],
+    "chown": {
+      "user": "wacos",
+      "group": "oinstall",
+      "paths": [
+        "/opt/wacos/xcdr/cfg/for_Bangladesh.cfg",
+        "/opt/wacos/xcdr/bin/back_raw_cdr.sh"
+      ]
+    },
+    "license": {
+      "has_license": false,
+      "file_path": "",
+      "user": ""
+    },
+    "start": {
+      "user": "root",
+      "commands": [
+        "cd /opt/wacos/xcdr/bin/",
+        "nohup ./xcdr_start_restart.sh &"
+      ]
+    }
+  },
+  "QUERY_data": {
+    "description": "QUERY_data查询数据功能",
+    "stop": {
+      "method": "script",
+      "user": "root",
+      "commands": [
+        "cd /data/utoss/ts_query/bin/",
+        "./crontab.sh stop start_update_db.sh"
+      ],
+      "process_names": []
+    },
+    "backup": {
+      "user": "root",
+      "base_dir": "/data/utoss",
+      "items": [
+        {
+          "source": "ts_query",
+          "backup_suffix": "_{date}",
+          "remove_source": true
+        }
+      ]
+    },
+    "patch": {
+      "filename": "QUERY_*.tar.gz",
+      "extract_user": "root",
+      "tar_path": "/opt/tar"
+    },
+    "post_extract": null,
+    "config_files": [
+      "/data/utoss/ts_query/bin/start_update_db.sh"
+    ],
+    "chown": null,
+    "license": {
+      "has_license": false,
+      "file_path": "",
+      "user": ""
+    },
+    "start": {
+      "user": "root",
+      "commands": [
+        "cd /data/utoss/ts_query/bin/",
+        "./crontab.sh start start_update_db.sh"
+      ],
+      "check": {
+        "command": "cd /data/utoss/ts_query/bin/ && ./crontab.sh status start_update_db.sh",
+        "expected": "crontab started"
+      }
+    }
+  },
+  "QUERY_opt": {
+    "description": "QUERY_opt查询功能(opt路径)",
+    "stop": {
+      "method": "script",
+      "user": "root",
+      "commands": [
+        "cd /opt/utoss/isbc_query/bin/",
+        "./crontab.sh stop start_update_db.sh"
+      ],
+      "process_names": []
+    },
+    "backup": {
+      "user": "root",
+      "base_dir": "/opt/utoss",
+      "items": [
+        {
+          "source": "isbc_query",
+          "backup_suffix": "_{date}",
+          "remove_source": true
+        }
+      ]
+    },
+    "patch": {
+      "filename": "QUERY_*.tar.gz",
+      "extract_user": "root",
+      "tar_path": "/opt/tar"
+    },
+    "post_extract": null,
+    "config_files": [
+      "/opt/utoss/isbc_query/bin/start_update_db.sh",
+      "/opt/utoss/isbc_query/cfg/es.cfg"
+    ],
+    "chown": null,
+    "license": {
+      "has_license": false,
+      "file_path": "",
+      "user": ""
+    },
+    "start": {
+      "user": "root",
+      "commands": [
+        "cd /opt/utoss/isbc_query/bin/",
+        "./crontab.sh start start_update_db.sh"
+      ],
+      "check": {
+        "command": "cd /opt/utoss/isbc_query/bin/ && ./crontab.sh status start_update_db.sh",
+        "expected": "crontab started"
+      }
+    }
+  },
+  "cdrTools": {
+    "description": "cdrTools话单工具功能",
+    "stop": {
+      "method": "script",
+      "user": "root",
+      "commands": [
+        "cd /opt/wacos/mswitch/cdrTools/bin",
+        "./stop.sh"
+      ],
+      "process_names": []
+    },
+    "backup": {
+      "user": "root",
+      "base_dir": "/opt/wacos/mswitch",
+      "items": [
+        {
+          "source": "cdrTools",
+          "backup_suffix": "_{date}",
+          "remove_source": true
+        }
+      ]
+    },
+    "patch": {
+      "filename": "cdrTools_*.tar.gz",
+      "extract_user": "root",
+      "tar_path": "/opt/tar"
+    },
+    "post_extract": null,
+    "config_files": [
+      "/opt/wacos/mswitch/cdrTools/config/application.yaml"
+    ],
+    "chown": null,
+    "license": {
+      "has_license": false,
+      "file_path": "",
+      "user": ""
+    },
+    "start": {
+      "user": "root",
+      "commands": [
+        "cd /opt/wacos/mswitch/cdrTools/bin",
+        "./start.sh"
+      ],
+      "check": {
+        "command": "cd /opt/wacos/mswitch/cdrTools/bin && ./status.sh",
+        "expected": "process is running",
+        "wait": 3
+      }
+    }
+  }
+}
