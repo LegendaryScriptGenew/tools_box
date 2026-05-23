@@ -1,118 +1,198 @@
 [
   {
-    "host": "10.10.10.61",
-    "port": 22,
-    "user": "root",
-    "pwd": "Genew@123",
-    "name": "MOK-SBCS"
-  },
-  {
     "host": "10.10.10.54",
+    "name": "MOK-MGCF",
     "port": 22,
-    "user": "root",
     "pwd": "Genew@123",
-    "name": "MOK-MGCF"
+    "user": "root"
   },
   {
-    "host": "10.10.20.61",
+    "host": "10.10.10.61",
+    "name": "MOK-SBCS",
     "port": 22,
-    "user": "root",
     "pwd": "Genew@123",
-    "name": "SBN-SBCS"
+    "user": "root"
+  },
+  {
+    "desc": "MOK-SBCM01",
+    "host": "10.10.10.64",
+    "name": "MOK-SBCM01",
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
+  },
+  {
+    "desc": "MOK-SBCM02",
+    "host": "10.10.10.65",
+    "name": "MOK-SBCM02",
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
   },
   {
     "host": "10.10.20.54",
+    "name": "SBN-MGCF",
     "port": 22,
-    "user": "root",
     "pwd": "Genew@123",
-    "name": "SBN-MGCF"
+    "user": "root"
   },
   {
-    "host": "10.10.30.61",
+    "host": "10.10.20.61",
+    "name": "SBN-SBCS",
     "port": 22,
-    "user": "root",
     "pwd": "Genew@123",
-    "name": "BOG-SBCS"
+    "user": "root"
+  },
+  {
+    "desc": "SBN-SBCM01",
+    "host": "10.10.20.64",
+    "name": "SBN-SBCM01",
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
+  },
+  {
+    "desc": "SBN-SBCM02",
+    "host": "10.10.10.65",
+    "name": "SBN-SBCM02",
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
   },
   {
     "host": "10.10.30.54",
+    "name": "BOG-MGCF",
     "port": 22,
-    "user": "root",
     "pwd": "Genew@123",
-    "name": "BOG-MGCF"
+    "user": "root"
   },
   {
-    "host": "10.10.40.61",
+    "host": "10.10.30.61",
+    "name": "BOG-SBCS",
     "port": 22,
-    "user": "root",
     "pwd": "Genew@123",
-    "name": "SYL-SBCS"
+    "user": "root"
+  },
+  {
+    "desc": "BOG-SBCM01",
+    "host": "10.10.30.64",
+    "name": "BOG-SBCM01",
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
+  },
+  {
+    "desc": "BOG-SBCM02",
+    "host": "10.10.10.65",
+    "name": "BOG-SBCM02",
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
   },
   {
     "host": "10.10.40.54",
+    "name": "SYL-MGCF",
     "port": 22,
-    "user": "root",
     "pwd": "Genew@123",
-    "name": "SYL-MGCF"
+    "user": "root"
   },
   {
-    "host": "10.10.50.61",
+    "host": "10.10.40.61",
+    "name": "SYL-SBCS",
     "port": 22,
-    "user": "root",
     "pwd": "Genew@123",
-    "name": "KHL-SBCS"
+    "user": "root"
   },
   {
     "host": "10.10.50.54",
+    "name": "KHL-MGCF",
     "port": 22,
-    "user": "root",
     "pwd": "Genew@123",
-    "name": "KHL-MGCF"
+    "user": "root"
   },
   {
-    "host": "10.10.60.61",
+    "host": "10.10.50.61",
+    "name": "KHL-SBCS",
     "port": 22,
-    "user": "root",
     "pwd": "Genew@123",
-    "name": "CTG-SBCS"
+    "user": "root"
   },
   {
     "host": "10.10.60.54",
+    "name": "CTG-MGCF",
     "port": 22,
-    "user": "root",
     "pwd": "Genew@123",
-    "name": "CTG-MGCF"
+    "user": "root"
   },
   {
+    "host": "10.10.60.61",
+    "name": "CTG-SBCS",
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
+  },
+  {
+    "desc": "KL-MGCF01",
     "host": "10.31.13.18",
-    "port": 22,
-    "user": "root",
-    "pwd": "Genew@123",
     "name": "KL-MGCF01",
-    "desc": "KL-MGCF01"
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
   },
   {
+    "desc": "KL-MGCF02",
     "host": "10.31.13.22",
-    "port": 22,
-    "user": "root",
-    "pwd": "Genew@123",
     "name": "KL-MGCF02",
-    "desc": "KL-MGCF02"
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
   },
   {
+    "desc": "KL-MGCF01-B",
     "host": "10.31.13.19",
-    "port": 22,
-    "user": "root",
-    "pwd": "Genew@123",
     "name": "KL-MGCF01-B",
-    "desc": "KL-MGCF01-B"
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
   },
   {
+    "desc": "KL-MGCF02-A",
     "host": "10.31.13.21",
-    "port": 22,
-    "user": "root",
-    "pwd": "Genew@123",
     "name": "KL-MGCF02-A",
-    "desc": "KL-MGCF02-A"
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
+  },
+  {
+    "desc": "KL-CCF",
+    "host": "10.31.13.25",
+    "name": "KL-CCF",
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
+  },
+  {
+    "desc": "ISBC_NMS_OLD",
+    "host": "10.13.81.15",
+    "name": "ISBC_NMS_OLD",
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
+  },
+  {
+    "desc": "ISBC_SBCS",
+    "host": "10.13.81.48",
+    "name": "ISBC_SBCS",
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
+  },
+  {
+    "desc": "BTCL_NMS_S90",
+    "host": "10.10.10.53",
+    "name": "BTCL_NMS_S90",
+    "port": 22,
+    "pwd": "Genew@123",
+    "user": "root"
   }
 ]

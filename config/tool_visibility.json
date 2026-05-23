@@ -9,5 +9,6 @@
   "安全基线检查": false,
   "密码生成器": false,
   "SSH登录测试": false,
-  "获取用户列表": false
+  "获取用户列表": false,
+  "日志查看": true
 }

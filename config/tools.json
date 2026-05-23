@@ -76,6 +76,13 @@
       "module": "IMS_NE_Upgrade_sub",
       "class": "IMSEUpgradeTool",
       "icon": "🔄"
+    },
+    {
+      "name": "日志查看",
+      "description": "远程日志查看工具，支持按网元类型（MGCF/CCF）查看日志文件、实时tail -f跟踪、批量下载。\n使用说明：\n  1.选择目标主机\n  2.选择网元类型（MGCF/CCF）\n  3.点击\"Connect & Load\"连接并加载日志文件列表\n  4.勾选文件可批量下载，点击\"View\"查看实时日志",
+      "module": "LogViewer_sub",
+      "class": "LogViewer",
+      "icon": "📄"
     }
   ]
 }
