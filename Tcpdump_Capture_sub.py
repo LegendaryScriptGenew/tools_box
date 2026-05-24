@@ -403,6 +403,29 @@ class SBCMCaptureWorker(QThread):
         self.log.emit(f"[SBCM] [send] {label}")
         chan.send(text)
 
+    def _telnet_and_diagnose(self, chan):
+        self._recv_all(chan)
+        self._send_cmd(chan, "telnet 127.0.0.1\n")
+        self._expect(chan, "[USERNAME]:")
+        self._send_cmd(chan, "admin\n", "admin (username)")
+        self._expect(chan, "[PASSWORD]:")
+        self._send_cmd(chan, "admin\n", "admin (password)")
+        self._expect(chan, "NuBiz>>")
+        self._send_cmd(chan, "cm diagnose\n")
+        self._expect(chan, "NuBiz$$")
+
+    def _stop_capture(self, chan):
+        self._send_cmd(chan, "debug dp 0x912\n")
+        self._expect(chan, "<para1>")
+        self._send_cmd(chan, "\n", "enter para1")
+        self._expect(chan, "<para2>")
+        self._send_cmd(chan, "\n", "enter para2")
+        self._expect(chan, "<para3>")
+        self._send_cmd(chan, "\n", "enter para3")
+        self._expect(chan, "<para4>")
+        self._send_cmd(chan, "\n", "enter para4")
+        self._expect(chan, "End of Packet Capture", timeout=120)
+
     def run(self):
         try:
             self.log.emit(f"[SBCM] Connecting {self.host}:{self.port}")
@@ -417,14 +440,7 @@ class SBCMCaptureWorker(QThread):
             time.sleep(1)
             self._recv_all(chan)
 
-            self._send_cmd(chan, "telnet 127.0.0.1\n")
-            self._expect(chan, "[USERNAME]:")
-            self._send_cmd(chan, "admin\n", "admin (username)")
-            self._expect(chan, "[PASSWORD]:")
-            self._send_cmd(chan, "admin\n", "admin (password)")
-            self._expect(chan, "NuBiz>>")
-            self._send_cmd(chan, "cm diagnose\n")
-            self._expect(chan, "NuBiz$$")
+            self._telnet_and_diagnose(chan)
             self._send_cmd(chan, "debug dp 0x911\n")
 
             self._expect(chan, "<para1>")
@@ -464,18 +480,17 @@ class SBCMCaptureWorker(QThread):
 
                 time.sleep(1)
 
-            self._send_cmd(chan, "debug dp 0x912\n")
+            for attempt in range(2):
+                try:
+                    self._stop_capture(chan)
+                    break
+                except Exception:
+                    if attempt == 0:
+                        self.log.emit("[SBCM] Session lost, re-telnet to stop capture...")
+                        self._telnet_and_diagnose(chan)
+                    else:
+                        raise
 
-            self._expect(chan, "<para1>")
-            self._send_cmd(chan, "\n", "enter para1")
-            self._expect(chan, "<para2>")
-            self._send_cmd(chan, "\n", "enter para2")
-            self._expect(chan, "<para3>")
-            self._send_cmd(chan, "\n", "enter para3")
-            self._expect(chan, "<para4>")
-            self._send_cmd(chan, "\n", "enter para4")
-
-            self._expect(chan, "End of Packet Capture", timeout=120)
             self.log.emit("[SBCM] Capture stopped, waiting for flush...")
             time.sleep(3)
 
@@ -719,7 +734,7 @@ class TcpdumpCapture(QWidget):
         self.log_box = QTextEdit()
         self.log_box.setReadOnly(True)
         self.log_box.setFont(QFont("Menlo", 10) if "Menlo" in QFont().families() else QFont("Consolas", 10))
-        self.log_box.setFixedHeight(150)
+        self.log_box.setMinimumHeight(80)
         self.log_box.setStyleSheet(
             "QTextEdit{background:#fafafa;border:1px solid #e0e0e0;border-radius:8px;"
             "padding:8px;font-size:11px;color:#1a1a1a;}")
@@ -730,7 +745,7 @@ class TcpdumpCapture(QWidget):
         log_v = QVBoxLayout(log_container)
         log_v.setContentsMargins(12, 10, 12, 12)
         log_v.addWidget(self.log_box)
-        layout.addWidget(log_container)
+        layout.addWidget(log_container, 1)
 
         self._on_mode_changed(self.mode_cb.currentIndex())
         self._update_preview()
