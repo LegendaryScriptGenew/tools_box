@@ -8,7 +8,7 @@ from scp import SCPClient
 from PySide6.QtWidgets import (QWidget, QApplication, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QCheckBox, QTextEdit, QFileDialog,
     QMessageBox, QGroupBox, QComboBox, QFormLayout, QFrame, QProgressBar,
-    QInputDialog, QCompleter, QDialog, QListWidget)
+    QInputDialog, QCompleter, QDialog, QListWidget, QListWidgetItem)
 from PySide6.QtCore import QThread, Signal, Qt, QTimer, QEvent
 from PySide6.QtGui import QFont
 
@@ -1362,6 +1362,8 @@ class TcpdumpCapture(QWidget):
         dlg.resize(520, 380)
         layout = QVBoxLayout(dlg)
         host_list = QListWidget()
+        host_list.setDragDropMode(QListWidget.InternalMove)
+        host_list.setDefaultDropAction(Qt.MoveAction)
         layout.addWidget(QLabel("Saved Hosts:"))
         layout.addWidget(host_list)
         form = QFormLayout()
@@ -1387,18 +1389,23 @@ class TcpdumpCapture(QWidget):
 
         def refresh_list():
             host_list.clear()
-            for h in self._hosts:
-                host_list.addItem(f"{h.get('desc', h['name'])} — {h['host']}:{h.get('port',22)} ({h['user']})")
+            for i, h in enumerate(self._hosts):
+                item = QListWidgetItem(f"{h.get('desc', h['name'])} — {h['host']}:{h.get('port',22)} ({h['user']})")
+                item.setData(Qt.UserRole, i)
+                host_list.addItem(item)
 
         def on_select():
-            row_idx = host_list.currentRow()
-            if 0 <= row_idx < len(self._hosts):
-                h = self._hosts[row_idx]
+            item = host_list.currentItem()
+            if not item:
+                return
+            idx = item.data(Qt.UserRole)
+            if idx is not None and 0 <= idx < len(self._hosts):
+                h = self._hosts[idx]
                 ip_edit.setText(h["host"]); port_edit.setText(str(h.get("port",22)))
                 user_edit.setText(h["user"]); pwd_edit.setText(h.get("pwd",""))
                 desc_edit.setText(h.get("desc",""))
 
-        host_list.currentRowChanged.connect(on_select)
+        host_list.currentItemChanged.connect(on_select)
         refresh_list()
 
         def on_add():
@@ -1412,9 +1419,11 @@ class TcpdumpCapture(QWidget):
         add_btn.clicked.connect(on_add)
 
         def on_update():
-            row_idx = host_list.currentRow()
-            if row_idx < 0 or not ip_edit.text().strip(): return
-            self._hosts[row_idx] = dict(host=ip_edit.text().strip(), port=int(port_edit.text().strip() or "22"),
+            item = host_list.currentItem()
+            if not item or not ip_edit.text().strip(): return
+            idx = item.data(Qt.UserRole)
+            if idx is None or idx >= len(self._hosts): return
+            self._hosts[idx] = dict(host=ip_edit.text().strip(), port=int(port_edit.text().strip() or "22"),
                 user=user_edit.text().strip() or "root", pwd=pwd_edit.text(), name=desc_edit.text().strip() or ip_edit.text().strip(), desc=desc_edit.text().strip())
             self._save_hosts()
             refresh_list(); self._reload_hosts()
@@ -1422,13 +1431,28 @@ class TcpdumpCapture(QWidget):
         update_btn.clicked.connect(on_update)
 
         def on_del():
-            row_idx = host_list.currentRow()
-            if row_idx < 0: return
-            if QMessageBox.question(dlg, "Confirm", f"Delete {self._hosts[row_idx]['host']}?") == QMessageBox.Yes:
-                self._hosts.pop(row_idx); self._save_hosts(); refresh_list(); self._reload_hosts()
+            item = host_list.currentItem()
+            if not item: return
+            idx = item.data(Qt.UserRole)
+            if idx is None or idx >= len(self._hosts): return
+            if QMessageBox.question(dlg, "Confirm", f"Delete {self._hosts[idx]['host']}?") == QMessageBox.Yes:
+                self._hosts.pop(idx); self._save_hosts(); refresh_list(); self._reload_hosts()
 
         del_btn.clicked.connect(on_del)
-        dlg.finished.connect(lambda: on_close() if on_close else None)
+        def on_dlg_close():
+            # reorder self._hosts to match drag-adjusted list order
+            new_order = []
+            for i in range(host_list.count()):
+                idx = host_list.item(i).data(Qt.UserRole)
+                if idx is not None and idx < len(self._hosts):
+                    new_order.append(self._hosts[idx])
+            if new_order:
+                self._hosts[:] = new_order
+                self._save_hosts()
+            if on_close:
+                on_close()
+
+        dlg.finished.connect(on_dlg_close)
         dlg.exec()
 
     def _save_hosts(self):
