@@ -97,6 +97,13 @@
       "module": "LogViewer_sub",
       "class": "LogViewer",
       "icon": "📄"
+    },
+    {
+      "name": "YUM源管理器",
+      "description": "Linux YUM 源管理器：创建本地 yum 源（ISO挂载）、Web yum 源（httpd）、新增 Web yum 源。支持防火墙/SELinux 一键关闭、多 ISO 批量处理、客户端 .repo 文件分发与检测。",
+      "module": "Linux_yum_sub",
+      "class": "MainWindow",
+      "icon": "📦"
     }
   ]
 }
