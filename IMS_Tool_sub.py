@@ -1310,6 +1310,17 @@ class IMSTool(QWidget):
         self.log_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.log_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.log_table.setAlternatingRowColors(True)
+        log_toolbar = QHBoxLayout()
+        self.log_select_all_cb = QCheckBox("Select All")
+        self.log_select_all_cb.toggled.connect(self._log_select_all)
+        log_toolbar.addWidget(self.log_select_all_cb)
+        self.log_download_selected_btn = QPushButton("Download Selected")
+        self.log_download_selected_btn.setStyleSheet("QPushButton{background:#00b894;color:white;border:none;border-radius:4px;padding:5px 14px;font-size:11px;font-weight:bold;}QPushButton:hover{background:#00a381;}QPushButton:disabled{background:#b2dfdb;color:white;}")
+        self.log_download_selected_btn.clicked.connect(self._log_download)
+        self.log_download_selected_btn.setEnabled(False)
+        log_toolbar.addWidget(self.log_download_selected_btn)
+        log_toolbar.addStretch()
+        layout.addLayout(log_toolbar)
         layout.addWidget(self.log_table, 1)
 
         # Tail bar
@@ -1334,6 +1345,7 @@ class IMSTool(QWidget):
 
         self._log_browse_path = ""
         self._log_root_paths = set()
+        self._log_tail_path = ""
         self.tabs.addTab(tab, "日志")
 
     def _load_log_ne_configs(self):
@@ -1353,6 +1365,15 @@ class IMSTool(QWidget):
         c.connect(h["host"], int(h.get("port",22)), h["user"], h.get("pwd",""), timeout=5)
         return c
 
+    def _log_select_all(self, checked):
+        for row in range(self.log_table.rowCount()):
+            cw = self.log_table.cellWidget(row, 0)
+            if not cw:
+                continue
+            cb = cw.layout().itemAt(0).widget()
+            if cb and cb.isEnabled():
+                cb.setChecked(checked)
+
     def _do_log_connect(self):
         h = self._current_log_host()
         if not h:
@@ -1362,6 +1383,10 @@ class IMSTool(QWidget):
         self._log_file_list = []
         self._log_current_path = ""
         self.log_table.setRowCount(0)
+        if hasattr(self, 'log_select_all_cb'):
+            self.log_select_all_cb.blockSignals(True); self.log_select_all_cb.setChecked(False); self.log_select_all_cb.blockSignals(False)
+        if hasattr(self, 'log_download_selected_btn'):
+            self.log_download_selected_btn.setEnabled(False)
         self._log_worker = LogListWorker(h["host"], h.get("port",22), h["user"], h.get("pwd",""), self.log_ne_combo.currentData())
         self._log_worker.log.connect(self._log)
         self._log_worker.file_info.connect(self._on_log_file_info)
@@ -1372,6 +1397,8 @@ class IMSTool(QWidget):
     def _on_log_file_info(self, info):
         self._log_file_list.append(info)
         self._log_table_add_row(info)
+        if hasattr(self, 'log_download_selected_btn'):
+            self.log_download_selected_btn.setEnabled(True)
 
     def _log_table_add_row(self, info):
         row = self.log_table.rowCount()
@@ -1449,13 +1476,18 @@ class IMSTool(QWidget):
         self.log_status.setText("● Connected")
         self.log_status.setStyleSheet("color:#27ae60;font-weight:bold;font-size:13px;")
         self._log_root_data = list(self._log_file_list)
+        if hasattr(self, 'log_download_selected_btn'):
+            self.log_download_selected_btn.setEnabled(bool(self._log_file_list))
 
     def _log_open_group_menu(self, btn, group_files):
         menu = QMenu()
         for fp in group_files:
             action = menu.addAction(fp)
             action.triggered.connect(lambda checked, p=fp: self._log_view_file_at(p))
-        menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+        if btn is not None:
+            menu.exec(btn.mapToGlobal(btn.rect().bottomLeft()))
+        else:
+            menu.exec(self.log_table.mapToGlobal(self.log_table.rect().center()))
 
     def _do_log_refresh(self):
         self._do_log_connect()
@@ -1464,6 +1496,8 @@ class IMSTool(QWidget):
         if not hasattr(self, '_log_root_data') or not self._log_root_data: return
         self.log_table.setRowCount(0)
         self._log_file_list = []
+        if hasattr(self, 'log_select_all_cb'):
+            self.log_select_all_cb.blockSignals(True); self.log_select_all_cb.setChecked(False); self.log_select_all_cb.blockSignals(False)
         for info in self._log_root_data:
             self._log_file_list.append(info)
             self._log_table_add_row(info)
@@ -1479,6 +1513,8 @@ class IMSTool(QWidget):
         self.log_status.setStyleSheet("color:#fdd835;font-weight:bold;font-size:13px;")
         self._log_file_list = []
         self.log_table.setRowCount(0)
+        if hasattr(self, 'log_select_all_cb'):
+            self.log_select_all_cb.blockSignals(True); self.log_select_all_cb.setChecked(False); self.log_select_all_cb.blockSignals(False)
         self._log_browse_worker = LogBrowseWorker(h["host"], h.get("port",22), h["user"], h.get("pwd",""), path)
         self._log_browse_worker.log.connect(self._log)
         self._log_browse_worker.file_info.connect(self._on_log_file_info)
@@ -1895,6 +1931,15 @@ class SSHWorker(QThread):
             if rc != 0: self._log(f"  ⚠ rc={rc}")
             else: self._log(f"  ✓ rc={rc}")
 
+    def _check_remote_path(self, path, path_type="path"):
+        qpath = _shell_quote(path)
+        rc, out, _ = self._exec(f"ls -d {qpath} 2>/dev/null && echo EXISTS || echo NOTEXISTS")
+        if out.strip().splitlines()[-1:] == ["EXISTS"]:
+            self._exec(f"stat --format='%F size:%s bytes modified:%y' {qpath} 2>/dev/null || file {qpath}")
+            return True
+        self._log(f"  [warn] {path_type} not found: {path}")
+        return False
+
     def _fmt_size(self, b):
         for u in ("B","KB","MB","GB"):
             if b<1024: return f"{b:.1f}{u}"
@@ -1964,9 +2009,14 @@ class SSHWorker(QThread):
             backup_name = item["source"]+item["backup_suffix"].replace("{date}",date_str)
             dst = posixpath.join(cfg["base_dir"], backup_name)
             bu = item.get("user") or cfg["user"]
-            rc, _, _ = self._exec(f"cp -r '{src}' '{dst}'", timeout=120, user=bu)
+            self._log(f"  backup {src} -> {dst} as {bu}")
+            if not self._check_remote_path(src, "backup source"):
+                continue
+            rc, _, _ = self._exec(f"cp -r {_shell_quote(src)} {_shell_quote(dst)}", timeout=120, user=bu)
             if rc==0 and item.get("remove_source",False):
-                self._exec(f"rm -rf '{src}'", timeout=60, user="root")
+                self._exec(f"rm -rf {_shell_quote(src)}", timeout=60, user="root")
+            if rc == 0:
+                self._check_remote_path(dst, "backup target")
             self._backup_map[item["source"]] = {"src":src,"dst":dst}
         self._log("✓ Step 2 done")
 
@@ -1975,18 +2025,27 @@ class SSHWorker(QThread):
         tar_path = self.ne["patch"].get("tar_path","/opt/tar")
         remote_name = os.path.basename(self.patch_local)
         remote_path = posixpath.join(tar_path, remote_name)
-        self._exec(f"mkdir -p '{tar_path}'")
+        self._exec(f"mkdir -p {_shell_quote(tar_path)}")
         self._log("Uploading..."); start = time.time()
+        last_pct = [0]
         def progress(t, total):
             if self._stopped: raise Exception("stopped")
+            if total:
+                pct = int(t / total * 100)
+                if pct >= last_pct[0] + 10 or pct == 100:
+                    elapsed = max(time.time() - start, 0.001)
+                    self._log(f"  [{pct:3d}%] {self._fmt_size(t)}/{self._fmt_size(total)} {t / elapsed / 1024:.0f}KB/s")
+                    last_pct[0] = pct
         self.sftp.put(self.patch_local, remote_path, callback=progress)
         self._uploaded_path = remote_path
+        self._check_remote_path(remote_path, "uploaded patch")
         self._log(f"✓ Upload done ({time.time()-start:.1f}s)"); self._log("✓ Step 3 done")
 
     def _do_extract(self):
         self._log("━━━ Step 4/9: Extract ━━━")
         user = self.ne["patch"]["extract_user"]
-        rc, _, _ = self._exec(f"tar -xzf '{self._uploaded_path}' -C /", timeout=180, user=user)
+        self._check_remote_path(self._uploaded_path, "uploaded patch")
+        rc, _, _ = self._exec(f"cd /opt/tar && tar -xzf {_shell_quote(self._uploaded_path)} -C /", timeout=180, user=user)
         if rc!=0: raise RuntimeError(f"tar extract failed rc={rc}")
         self._log("✓ Step 4 done")
 
@@ -2007,25 +2066,43 @@ class SSHWorker(QThread):
                 sp = posixpath.join(base_dir, sk)
                 if cf==sp or cf.startswith(sp+"/"): old_path = cf.replace(sp, info["dst"], 1); break
             if not old_path: continue
+            old_found = True; new_found = True
             try:
                 with self.sftp.open(old_path,"r") as f: old_c = f.read().decode("utf-8",errors="replace")
-            except: old_c = ""
+            except:
+                old_c = ""; old_found = False
             try:
                 with self.sftp.open(cf,"r") as f: new_c = f.read().decode("utf-8",errors="replace")
-            except: new_c = ""
+            except:
+                new_c = ""; new_found = False
+            if not new_found:
+                self._log(f"  [warn] new config not found, skip: {cf}")
+                continue
+            if not old_found:
+                self._log(f"  [warn] backup config not found, keep new config: {old_path}")
+                file_items.append({"path":cf,"old_content":"","new_content":new_c,"hunks":[],"skip_diff":True})
+                continue
             ol = old_c.splitlines(True); nl = new_c.splitlines(True)
             diff = list(difflib.unified_diff(ol, nl, fromfile="old", tofile="new", lineterm=""))
             hunks = self._parse_hunks(diff)
             file_items.append({"path":cf,"old_content":old_c,"new_content":new_c,"hunks":hunks})
         if not file_items: return
-        self.config_diff_signal.emit(file_items)
-        self._config_diff_result = None
-        while self._config_diff_result is None and not self._stopped: time.sleep(0.1)
+        skip_items = [it for it in file_items if it.get("skip_diff")]
+        diff_items = [it for it in file_items if not it.get("skip_diff")]
+        results = [{"path": it["path"], "merged_content": it["new_content"]} for it in skip_items]
+        if diff_items:
+            self.config_diff_signal.emit(diff_items)
+            self._config_diff_result = None
+            while self._config_diff_result is None and not self._stopped: time.sleep(0.1)
+            if self._config_diff_result:
+                results.extend(self._config_diff_result)
         if self._stopped: return
-        for r in self._config_diff_result:
+        for r in results:
             try:
                 with self.sftp.open(r["path"],"w") as f: f.write(r["merged_content"])
-            except: pass
+                self._log(f"  wrote merged config: {r['path']}")
+            except Exception as e:
+                self._log(f"  [warn] failed writing {r['path']}: {e}")
         self._log("✓ Step 6 done")
 
     def _parse_hunks(self, diff_lines):
@@ -2050,7 +2127,9 @@ class SSHWorker(QThread):
         if not cfg: return
         for p in cfg["paths"]:
             if self._stopped: return
-            self._exec(f"chown {cfg['user']}:{cfg['group']} '{p}'", user="root")
+            rc, _, _ = self._exec(f"chown {cfg['user']}:{cfg['group']} {_shell_quote(p)}", user="root")
+            if rc == 0:
+                self._exec(f"ls -l {_shell_quote(p)} | awk '{{print $3\":\"$4}}'")
         self._log("✓ Step 7 done")
 
     def _do_license(self):
@@ -2060,7 +2139,12 @@ class SSHWorker(QThread):
         for sk, info in self._backup_map.items():
             sp = posixpath.join(base_dir, sk)
             if lp.startswith(sp+"/") or lp==sp: old_lp = lp.replace(sp, info["dst"], 1); break
-        if old_lp: self._exec(f"cp '{old_lp}' '{lp}'", user=cfg.get("user","root"))
+        self._check_remote_path(lp, "license")
+        if old_lp and self._check_remote_path(old_lp, "backup license"):
+            self._exec(f"cp {_shell_quote(old_lp)} {_shell_quote(lp)}", user=cfg.get("user","root"))
+            self._check_remote_path(lp, "restored license")
+        elif not old_lp:
+            self._log("  [warn] no matching license path found in backup map")
         self._log("✓ Step 8 done")
 
     def _do_start(self):
@@ -2157,23 +2241,22 @@ class LogBrowseWorker(QThread):
         try:
             c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             c.connect(self.host, self.port, self.user, self.pwd, timeout=5)
-            stdin, stdout, stderr = c.exec_command(f"ls -lh --time-style='+%Y-%m-%d %H:%M:%S' {self.path} 2>/dev/null | grep -v '^total' | tail -200")
-            out = stdout.read().decode("utf-8",errors="replace"); c.close()
-            for line in out.split("\n"):
-                line = line.strip()
-                if not line: continue
-                parts = line.split()
-                if len(parts)<7: continue
-                fname = parts[-1]
-                fpath = posixpath.join(self.path, fname)
-                is_dir = parts[0].startswith("d")
-                if is_dir:
-                    self.file_info.emit({"path": fpath, "name": fname+"/", "size": 0, "type": "directory", "desc": ""})
-                else:
-                    sz_str = parts[4]
-                    try: sz = int(sz_str)
-                    except: sz = 0
-                    self.file_info.emit({"path": fpath, "name": fname, "size": sz, "type": "file", "desc": ""})
+            qpath = _shell_quote(self.path.rstrip("/"))
+            stdin, stdout, stderr = c.exec_command(f"find {qpath} -maxdepth 1 -mindepth 1 -type d -print 2>/dev/null | sort | head -200")
+            dirs = [line.strip() for line in stdout.read().decode("utf-8",errors="replace").split("\n") if line.strip()]
+            for d in dirs:
+                self.file_info.emit({"path": d, "name": os.path.basename(d)+"/", "size": 0, "type": "directory", "desc": ""})
+            stdin, stdout, stderr = c.exec_command(f"find {qpath} -maxdepth 1 -mindepth 1 -type f -print 2>/dev/null | sort | head -500")
+            files = [line.strip() for line in stdout.read().decode("utf-8",errors="replace").split("\n") if line.strip()]
+            groups = LogListWorker._group_files(files)
+            for (gdir, stem, ext), group_files in sorted(groups.items()):
+                pattern = f"{stem}*{ext}" if stem != os.path.basename(group_files[0]) else os.path.basename(group_files[0])
+                self.file_info.emit({
+                    "path": gdir, "name": pattern, "size": len(group_files),
+                    "type": "group", "group_files": sorted(group_files),
+                    "pattern_path": f"{gdir}/{pattern}", "desc": ""
+                })
+            c.close()
             self.finished.emit()
         except Exception as e: self.error.emit(str(e))
 
@@ -2183,14 +2266,24 @@ class LogViewerWorker(QThread):
         super().__init__()
         self.host = host; self.port = int(port); self.user = user; self.pwd = pwd
         self.remote_path = remote_path; self.tail = tail; self._stop = False
-    def stop(self): self._stop = True
+        self._ssh = None; self._chan = None
+    def stop(self):
+        self._stop = True
+        try:
+            if self._chan: self._chan.close()
+        except: pass
+        try:
+            if self._ssh: self._ssh.close()
+        except: pass
     def run(self):
         try:
             c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            c.connect(self.host, self.port, self.user, self.pwd, timeout=5)
+            c.connect(self.host, self.port, self.user, self.pwd, timeout=5); self._ssh = c
+            qpath = _shell_quote(self.remote_path)
             if self.tail:
                 chan = c.get_transport().open_session()
-                chan.exec_command(f"tail -f {self.remote_path}")
+                self._chan = chan
+                chan.exec_command(f"tail -n 500 -f {qpath} 2>/dev/null")
                 while not self._stop:
                     if chan.recv_ready():
                         data = chan.recv(4096).decode("utf-8",errors="replace")
@@ -2199,7 +2292,7 @@ class LogViewerWorker(QThread):
                     else: time.sleep(0.1)
                 chan.close()
             else:
-                stdin, stdout, stderr = c.exec_command(f"cat {self.remote_path} 2>/dev/null | tail -200")
+                stdin, stdout, stderr = c.exec_command(f"tail -200 {qpath} 2>/dev/null")
                 out = stdout.read().decode("utf-8",errors="replace")
                 for line in out.split("\n"):
                     if line.strip(): self.log.emit(line)
@@ -2223,7 +2316,7 @@ class LogDownloadWorker(QThread):
                 else:
                     rp = f; lp = os.path.join(self.save_dir, os.path.basename(f))
                 self.log.emit(f"[download] {rp} -> {lp}")
-                SCPClient(c.get_transport()).get(rp, lp)
+                SCPClient(c.get_transport()).get(rp, lp, recursive=True)
             c.close(); self.done.emit()
         except Exception as e: self.error.emit(str(e))
 
