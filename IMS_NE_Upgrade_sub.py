@@ -18,7 +18,7 @@ from PySide6.QtGui import QFont
 
 logger = logging.getLogger(__name__)
 
-PATH = os.path.dirname(__file__)
+PATH = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
 NE_CONFIG_PATH = os.path.join(PATH, "config", "ims_ne_config.json")
 IMS_HOSTS_PATH = os.path.join(PATH, "config", "ims_hosts.json")
 

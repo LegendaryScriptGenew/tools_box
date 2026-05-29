@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QListWidget,
     QDialog)
 from PySide6.QtCore import QSize, Qt
 
-PATH = os.path.dirname(__file__)
+PATH = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
 TOOLS_CFG = os.path.join(PATH, "config", "tools.json")
 TOOL_ICONS = ["🕐", "👤", "🔐", "🛠", "⚙", "📊", "🔧", "💻", "🌐", "📁"]
 VIS_CFG = os.path.join(PATH, "config", "tool_visibility.json")
