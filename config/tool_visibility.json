@@ -1,7 +1,4 @@
 {
-  "远程抓包": true,
-  "日志查看": true,
-  "IMS网元升级": true,
   "Docker自动化": true,
   "网段Ping扫描器": true,
   "批量配置NTP": true,
