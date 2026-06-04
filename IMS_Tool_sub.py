@@ -276,6 +276,7 @@ class IMSTool(QWidget):
         self._log_browse_worker = None
         self._log_tail_worker = None
         self._log_dl_worker = None
+        self._log_download_active = False
         self._active_remote_paths = []
         self._init_ui()
 
@@ -1125,6 +1126,8 @@ class IMSTool(QWidget):
             QMessageBox.warning(self, "Warning", "Select save directory"); return
         os.makedirs(save_dir, exist_ok=True)
         self._manual_workers = []; self._manual_errors = 0; self._manual_started_count = 0
+        self._stop_workers = []; self._stop_done = 0; self._stop_errors = 0; self._stop_results = []
+        self._manual_stopping = False; self._stop_completed = False
         self._capturing = True; self.cap_mode_cb.setEnabled(False); self.cap_start_btn.setEnabled(False); self.cap_stop_btn.setEnabled(False)
         for task in tasks:
             ttype, h, expr, oname = task[:4]
@@ -1151,6 +1154,7 @@ class IMSTool(QWidget):
     def _do_cap_manual_stop(self):
         if not self._manual_workers: return
         self.cap_stop_btn.setEnabled(False); self.cap_start_btn.setEnabled(False)
+        self._manual_stopping = True
         self._stop_workers = []; self._stop_done = 0; self._stop_errors = 0; self._stop_results = []
         self._stop_completed = False
         for w in self._manual_workers:
@@ -1172,20 +1176,25 @@ class IMSTool(QWidget):
                 self._stop_workers.append(sw); sw.start()
                 if hasattr(w, 'request_stop'):
                     w.request_stop()
+        if not self._stop_workers:
+            self._manual_stopping = False
+            self._capturing = False
+            self.cap_mode_cb.setEnabled(True); self.cap_start_btn.setEnabled(True); self.cap_stop_btn.setEnabled(False)
 
     def _on_manual_started(self): self._manual_started_count += 1
     def _on_manual_control_ready(self, ready):
         sender = self.sender()
         if sender:
             sender.setProperty("_control_ready", bool(ready))
-        if not getattr(self, '_capturing', False) or getattr(self, '_stop_workers', []):
+        if not getattr(self, '_capturing', False) or getattr(self, '_manual_stopping', False):
             return
         any_ready = any(bool(w.property("_control_ready")) for w in getattr(self, '_manual_workers', []) or [])
         self.cap_stop_btn.setEnabled(any_ready)
     def _on_manual_error(self, msg):
         self._manual_errors += 1; self._log(f"[error] {msg}")
         if self._manual_errors >= len(self._manual_workers):
-            self._capturing = False; self.cap_mode_cb.setEnabled(True); self.cap_start_btn.setEnabled(True); self.cap_stop_btn.setEnabled(False)
+            self._capturing = False; self._manual_stopping = False
+            self.cap_mode_cb.setEnabled(True); self.cap_start_btn.setEnabled(True); self.cap_stop_btn.setEnabled(False)
     def _on_manual_stopped(self, lp):
         self._stop_done += 1; self._stop_results.append(lp); self._log(f"[done] {lp}")
     def _on_manual_stop_error(self, msg):
@@ -1194,8 +1203,11 @@ class IMSTool(QWidget):
         self._forget_remote_capture(self.sender())
         if self._stop_done + self._stop_errors >= len(self._stop_workers) and not getattr(self, '_stop_completed', False):
             self._stop_completed = True
-            self._capturing = False; self.cap_mode_cb.setEnabled(True); self.cap_start_btn.setEnabled(True); self.cap_stop_btn.setEnabled(False)
+            self._capturing = False; self._manual_stopping = False
+            self.cap_mode_cb.setEnabled(True); self.cap_start_btn.setEnabled(True); self.cap_stop_btn.setEnabled(False)
             if self._stop_results: self._show_cap_done(self._stop_results)
+            self._manual_workers = []
+            self._stop_workers = []
     def _on_multi_progress(self, idx, val):
         count = len(self._timer_workers) or 1
         total = sum((w.property("_prog") or 0) if w != self._timer_workers[idx] else val for i, w in enumerate(self._timer_workers))
@@ -1568,11 +1580,47 @@ class IMSTool(QWidget):
         self.log_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
         self.log_table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeToContents)
         self.log_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.Fixed)
-        self.log_table.setColumnWidth(5, 160)
+        self.log_table.setColumnWidth(5, 180)
         self.log_table.verticalHeader().setVisible(False)
+        self.log_table.verticalHeader().setDefaultSectionSize(34)
+        self.log_table.verticalHeader().setMinimumSectionSize(34)
         self.log_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.log_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.log_table.setAlternatingRowColors(True)
+        self.log_table.setStyleSheet("""
+            QTableWidget {
+                background:white;
+                alternate-background-color:#fbfcfd;
+                border:1px solid #dfe7ec;
+                border-radius:8px;
+                gridline-color:#edf1f4;
+                selection-background-color:#e8f1f6;
+                selection-color:#1f2933;
+            }
+            QTableWidget::item {
+                padding:6px 8px;
+                border:none;
+                color:#1f2933;
+            }
+            QTableWidget::item:hover {
+                background:#f3f7fa;
+                color:#1f2933;
+            }
+            QTableWidget::item:selected,
+            QTableWidget::item:selected:active,
+            QTableWidget::item:selected:!active {
+                background:#e8f1f6;
+                color:#1f2933;
+            }
+            QHeaderView::section {
+                background:#f8fafb;
+                color:#344054;
+                border:none;
+                border-bottom:1px solid #dfe7ec;
+                padding:8px;
+                font-weight:600;
+            }
+        """)
         log_toolbar = QHBoxLayout()
         self.log_select_all_cb = QCheckBox("Select All")
         self.log_select_all_cb.toggled.connect(self._log_select_all)
@@ -1666,6 +1714,7 @@ class IMSTool(QWidget):
     def _log_table_add_row(self, info):
         row = self.log_table.rowCount()
         self.log_table.insertRow(row)
+        self.log_table.setRowHeight(row, 34)
 
         is_missing = info.get("missing", False)
         is_group = info.get("type") == "group"
@@ -1711,11 +1760,13 @@ class IMSTool(QWidget):
         self.log_table.setItem(row, 4, size_item)
 
         actions_w = QWidget()
-        actions_l = QHBoxLayout(actions_w); actions_l.setContentsMargins(4,2,4,2); actions_l.setSpacing(4)
+        actions_l = QHBoxLayout(actions_w); actions_l.setContentsMargins(0,0,0,0); actions_l.setSpacing(6); actions_l.setAlignment(Qt.AlignCenter)
         view_btn = QPushButton("View" if not is_dir else "Enter")
-        view_btn.setStyleSheet("QPushButton{background:#00b894;color:white;border:none;border-radius:4px;padding:4px 12px;font-size:11px;}QPushButton:hover{background:#00a381;}")
+        view_btn.setFixedSize(62, 24)
+        view_btn.setStyleSheet("QPushButton{background:#00b894;color:white;border:none;border-radius:4px;padding:0;font-size:11px;}QPushButton:hover{background:#00a381;}")
         dl_btn = QPushButton("Download")
-        dl_btn.setStyleSheet("QPushButton{background:#0984e3;color:white;border:none;border-radius:4px;padding:4px 12px;font-size:11px;}QPushButton:hover{background:#0873c4;}")
+        dl_btn.setFixedSize(86, 24)
+        dl_btn.setStyleSheet("QPushButton{background:#0984e3;color:white;border:none;border-radius:4px;padding:0;font-size:11px;}QPushButton:hover{background:#0873c4;}")
         if is_missing:
             view_btn.setEnabled(False); dl_btn.setEnabled(False); cb.setEnabled(False)
         if is_group:
@@ -1732,7 +1783,7 @@ class IMSTool(QWidget):
         else:
             view_btn.clicked.connect(lambda checked, p=fpath: self._log_view_file_at(p))
             dl_btn.clicked.connect(lambda checked, p=fpath, n=info.get("name","file"): self._log_download_path(p))
-        actions_l.addWidget(view_btn); actions_l.addWidget(dl_btn); actions_l.addStretch()
+        actions_l.addWidget(view_btn); actions_l.addWidget(dl_btn)
         self.log_table.setCellWidget(row, 5, actions_w)
 
     def _on_log_list_finished(self):
@@ -1822,6 +1873,9 @@ class IMSTool(QWidget):
         self.log_stop_tail_btn.setVisible(False)
 
     def _log_download(self):
+        if getattr(self, '_log_download_active', False):
+            self._log("[download] Another download is running")
+            return
         rows = self._get_log_selected_rows()
         if not rows: return
         h = self._current_log_host()
@@ -1837,33 +1891,70 @@ class IMSTool(QWidget):
                 files_to_dl.append(info["path"])
             else:
                 files_to_dl.append(info["path"])
-        self._log_dl_worker = LogDownloadWorker(h["host"], h.get("port",22), h["user"], h.get("pwd",""), files_to_dl, save_dir)
-        self._log_dl_worker.log.connect(self._log)
-        self._log_dl_worker.done.connect(lambda: self._log("[download] Done"))
-        self._log_dl_worker.error.connect(lambda e: self._log(f"[error] {e}"))
-        self._log_dl_worker.start()
+        self._start_log_download(files_to_dl, save_dir)
 
     def _log_download_group(self, group_files):
+        if getattr(self, '_log_download_active', False):
+            self._log("[download] Another download is running")
+            return
         h = self._current_log_host()
         if not h: return
         save_dir = QFileDialog.getExistingDirectory(self, "Save to")
         if not save_dir: return
-        self._log_dl_worker = LogDownloadWorker(h["host"], h.get("port",22), h["user"], h.get("pwd",""), group_files, save_dir)
-        self._log_dl_worker.log.connect(self._log)
-        self._log_dl_worker.done.connect(lambda: self._log("[download] Done"))
-        self._log_dl_worker.error.connect(lambda e: self._log(f"[error] {e}"))
-        self._log_dl_worker.start()
+        self._start_log_download(group_files, save_dir)
 
     def _log_download_path(self, path):
+        if getattr(self, '_log_download_active', False):
+            self._log("[download] Another download is running")
+            return
         h = self._current_log_host()
         if not h: return
         save_dir = QFileDialog.getExistingDirectory(self, "Save to")
         if not save_dir: return
-        self._log_dl_worker = LogDownloadWorker(h["host"], h.get("port",22), h["user"], h.get("pwd",""), [{"remote_path": path, "filename": os.path.basename(path)}], save_dir)
+        self._start_log_download([{"remote_path": path, "filename": os.path.basename(path)}], save_dir)
+
+    def _start_log_download(self, files_to_dl, save_dir):
+        if not files_to_dl:
+            return
+        if getattr(self, '_log_download_active', False):
+            self._log("[download] Another download is running")
+            return
+        h = self._current_log_host()
+        if not h:
+            return
+        self._log_download_active = True
+        self.log_status.setText("● Downloading...")
+        self.log_status.setStyleSheet("color:#fdd835;font-weight:bold;font-size:13px;")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        if hasattr(self, 'log_download_selected_btn'):
+            self.log_download_selected_btn.setEnabled(False)
+        self.log_connect_btn.setEnabled(False)
+        self.log_refresh_btn.setEnabled(False)
+        self._log_dl_worker = LogDownloadWorker(h["host"], h.get("port",22), h["user"], h.get("pwd",""), files_to_dl, save_dir)
         self._log_dl_worker.log.connect(self._log)
-        self._log_dl_worker.done.connect(lambda: self._log("[download] Done"))
-        self._log_dl_worker.error.connect(lambda e: self._log(f"[error] {e}"))
+        self._log_dl_worker.progress.connect(self.progress_bar.setValue)
+        self._log_dl_worker.done.connect(self._on_log_download_done)
+        self._log_dl_worker.error.connect(self._on_log_download_error)
         self._log_dl_worker.start()
+
+    def _finish_log_download_ui(self, ok):
+        self._log_download_active = False
+        self.progress_bar.setVisible(False)
+        self.log_connect_btn.setEnabled(True)
+        self.log_refresh_btn.setEnabled(True)
+        if hasattr(self, 'log_download_selected_btn'):
+            self.log_download_selected_btn.setEnabled(bool(getattr(self, '_log_file_list', [])))
+        self.log_status.setText("● Connected" if ok else "● Error")
+        self.log_status.setStyleSheet("color:#27ae60;font-weight:bold;font-size:13px;" if ok else "color:#e74c3c;font-weight:bold;font-size:13px;")
+
+    def _on_log_download_done(self, message):
+        self._log(f"[download] {message}")
+        self._finish_log_download_ui(True)
+
+    def _on_log_download_error(self, message):
+        self._log(f"[error] {message}")
+        self._finish_log_download_ui(False)
 
     def _get_log_selected_rows(self):
         rows = set()
@@ -3002,24 +3093,130 @@ class LogViewerWorker(QThread):
         except Exception as e: self.log.emit(f"Error: {e}"); self.done.emit()
 
 class LogDownloadWorker(QThread):
-    log = Signal(str); done = Signal(); error = Signal(str)
+    log = Signal(str); progress = Signal(int); done = Signal(str); error = Signal(str)
     def __init__(self, host, port, user, pwd, files, save_dir):
         super().__init__()
         self.host = host; self.port = int(port); self.user = user; self.pwd = pwd
         self.files = files; self.save_dir = save_dir
-    def run(self):
+
+    def _exec(self, c, cmd, timeout=None):
+        _, stdout, stderr = c.exec_command(cmd, timeout=timeout)
+        out = stdout.read().decode("utf-8", errors="replace")
+        err = stderr.read().decode("utf-8", errors="replace")
+        rc = stdout.channel.recv_exit_status()
+        return rc, out, err
+
+    def _items(self):
+        items = []
+        used = {}
+        for item in self.files:
+            if isinstance(item, dict):
+                rp = item.get("remote_path") or item.get("path") or ""
+                name = item.get("filename") or os.path.basename(rp.rstrip("/"))
+            else:
+                rp = str(item)
+                name = os.path.basename(rp.rstrip("/"))
+            rp = rp.strip()
+            name = (name or "download").strip().replace("/", "_").replace("\\", "_")
+            if not rp:
+                continue
+            base, ext = os.path.splitext(name)
+            idx = used.get(name, 0)
+            used[name] = idx + 1
+            if idx:
+                name = f"{base}_{idx + 1}{ext}"
+            items.append((rp, name))
+        return items
+
+    def _remote_is_dir(self, c, remote_path):
+        rc, out, _ = self._exec(c, f"test -d {_shell_quote(remote_path)} && echo DIR || echo FILE", timeout=10)
+        return rc == 0 and out.strip() == "DIR"
+
+    def _safe_extract(self, archive_path):
+        target = os.path.abspath(self.save_dir)
+        with tarfile.open(archive_path, "r:gz") as tf:
+            for member in tf.getmembers():
+                member_path = os.path.abspath(os.path.join(target, member.name))
+                if member_path != target and not member_path.startswith(target + os.sep):
+                    raise RuntimeError(f"Unsafe archive member: {member.name}")
+            tf.extractall(target)
+
+    def _download_archive(self, c, items):
+        batch_id = f"ims_log_dl_{int(time.time())}_{threading.get_ident()}"
+        remote_dir = f"/tmp/{batch_id}"
+        remote_archive = f"/tmp/{batch_id}.tar.gz"
+        local_archive = None
         try:
+            rc, _, err = self._exec(c, f"rm -rf {_shell_quote(remote_dir)} {_shell_quote(remote_archive)}; mkdir -p {_shell_quote(remote_dir)}", timeout=20)
+            if rc != 0:
+                raise RuntimeError(err.strip() or "Create remote temp directory failed")
+            total = len(items)
+            for idx, (rp, name) in enumerate(items, 1):
+                link_path = posixpath.join(remote_dir, name)
+                rc, _, err = self._exec(c, f"ln -s {_shell_quote(rp)} {_shell_quote(link_path)}", timeout=20)
+                if rc != 0:
+                    raise RuntimeError(err.strip() or f"Prepare remote file failed: {rp}")
+                self.progress.emit(5 + int(idx / max(total, 1) * 20))
+            self.log.emit(f"[download] packaging {total} item(s) on remote host")
+            rc, _, err = self._exec(c, f"tar -C {_shell_quote(remote_dir)} -czhf {_shell_quote(remote_archive)} .", timeout=600)
+            if rc != 0:
+                raise RuntimeError(err.strip() or "Remote archive failed")
+            self.progress.emit(45)
+            fd, local_archive = tempfile.mkstemp(prefix="ims_logs_", suffix=".tar.gz", dir=self.save_dir)
+            os.close(fd)
+            self.log.emit(f"[download] {remote_archive} -> {local_archive}")
+            sftp = c.open_sftp()
+            try:
+                sftp.get(remote_archive, local_archive)
+            finally:
+                sftp.close()
+            self.progress.emit(80)
+            self.log.emit(f"[download] extracting to {self.save_dir}")
+            self._safe_extract(local_archive)
+            self.progress.emit(95)
+        finally:
+            try:
+                self._exec(c, f"rm -rf {_shell_quote(remote_dir)} {_shell_quote(remote_archive)}", timeout=20)
+            except Exception:
+                pass
+            if local_archive and os.path.exists(local_archive):
+                try: os.remove(local_archive)
+                except Exception: pass
+
+    def _download_single(self, c, remote_path, local_name):
+        lp = os.path.join(self.save_dir, local_name)
+        os.makedirs(os.path.dirname(lp), exist_ok=True)
+        self.log.emit(f"[download] {remote_path} -> {lp}")
+        sftp = c.open_sftp()
+        try:
+            sftp.get(remote_path, lp)
+        finally:
+            sftp.close()
+        self.progress.emit(100)
+
+    def run(self):
+        c = None
+        try:
+            os.makedirs(self.save_dir, exist_ok=True)
+            items = self._items()
+            if not items:
+                self.done.emit("No files to download")
+                return
             c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            c.connect(self.host, self.port, self.user, self.pwd, timeout=5)
-            for f in self.files:
-                if isinstance(f, dict):
-                    rp = f["remote_path"]; lp = os.path.join(self.save_dir, f["filename"])
-                else:
-                    rp = f; lp = os.path.join(self.save_dir, os.path.basename(f))
-                self.log.emit(f"[download] {rp} -> {lp}")
-                SCPClient(c.get_transport()).get(rp, lp, recursive=True)
-            c.close(); self.done.emit()
+            c.connect(self.host, self.port, self.user, self.pwd, timeout=10)
+            self.progress.emit(3)
+            if len(items) == 1 and not self._remote_is_dir(c, items[0][0]):
+                self._download_single(c, items[0][0], items[0][1])
+            else:
+                self._download_archive(c, items)
+                self.progress.emit(100)
+            self.done.emit(f"Done ({len(items)} item{'s' if len(items) != 1 else ''})")
         except Exception as e: self.error.emit(str(e))
+        finally:
+            try:
+                if c: c.close()
+            except Exception:
+                pass
 
 class NEServiceWorker(QThread):
     log = Signal(str); service_finished = Signal(bool, str)

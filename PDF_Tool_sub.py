@@ -7,21 +7,30 @@ import os
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, Signal, Qt
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtCore import QObject, QThread, Signal, Qt, QSize, QMimeData, QRect
+from PySide6.QtGui import QColor, QDrag, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QDialog,
     QFileDialog,
+    QFrame,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListView,
     QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
+    QStyle,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTabWidget,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -234,6 +243,596 @@ class PdfDropListWidget(QListWidget):
         return files
 
 
+class PdfMergeListWidget(PdfDropListWidget):
+    preview_requested = Signal(str)
+    expand_requested = Signal(str)
+
+    INTERNAL_REORDER_MIME = "application/x-pdf-merge-reorder"
+    THUMB_SIZE = QSize(190, 140)
+    GRID_SIZE = QSize(230, 215)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._browse_mode = False
+        self._overlay = QFrame(self.viewport())
+        self._overlay.setObjectName("pdfItemOverlay")
+        self._overlay.setStyleSheet(
+            """
+            QFrame#pdfItemOverlay {
+                background:#ffffff;
+                border:1px solid #a9b4bf;
+                border-radius:4px;
+            }
+            QToolButton {
+                border:none;
+                padding:4px;
+                color:#4b5563;
+                font-size:12px;
+            }
+            QToolButton:hover { background:#edf5ff; color:#0984e3; }
+            """
+        )
+        overlay_layout = QVBoxLayout(self._overlay)
+        overlay_layout.setContentsMargins(4, 4, 4, 4)
+        overlay_layout.setSpacing(4)
+
+        self._delete_btn = QToolButton(self._overlay)
+        self._delete_btn.setToolTip("删除选中的 PDF")
+        self._delete_btn.setText("删除")
+        self._delete_btn.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
+        self._preview_btn = QToolButton(self._overlay)
+        self._preview_btn.setToolTip("放大预览")
+        self._preview_btn.setText("放大")
+        self._preview_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogContentsView))
+        self._expand_btn = QToolButton(self._overlay)
+        self._expand_btn.setToolTip("展开多页预览")
+        self._expand_btn.setText("展开")
+        self._expand_btn.setIcon(self.style().standardIcon(QStyle.SP_TitleBarUnshadeButton))
+        for btn in (self._delete_btn, self._preview_btn, self._expand_btn):
+            btn.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            overlay_layout.addWidget(btn)
+
+        self._overlay.hide()
+        self._drop_indicator = QFrame(self.viewport())
+        self._drop_indicator.setObjectName("pdfDropIndicator")
+        self._drop_indicator.setStyleSheet(
+            """
+            QFrame#pdfDropIndicator {
+                background:rgba(9, 132, 227, 90);
+                border:1px solid rgba(9, 132, 227, 180);
+                border-radius:3px;
+            }
+            """
+        )
+        self._drop_indicator.hide()
+        self.itemSelectionChanged.connect(self._update_overlay)
+        self.itemDoubleClicked.connect(self._preview_double_clicked_item)
+        self._delete_btn.clicked.connect(self.remove_current_item)
+        self._preview_btn.clicked.connect(self._preview_current_item)
+        self._expand_btn.clicked.connect(self._expand_current_item)
+        self.setWordWrap(True)
+        self.set_browse_mode(True)
+
+    def set_browse_mode(self, enabled):
+        self._browse_mode = enabled
+        self.setDragEnabled(enabled)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(enabled)
+        self.setDefaultDropAction(Qt.MoveAction if enabled else Qt.CopyAction)
+        self.setDragDropMode(QListWidget.DragDrop if enabled else QListWidget.DropOnly)
+        self.setDragDropOverwriteMode(False)
+        self.setMovement(QListView.Snap if enabled else QListView.Static)
+        self.setResizeMode(QListView.Adjust)
+        self.setWrapping(enabled)
+        self.setViewMode(QListView.IconMode if enabled else QListView.ListMode)
+        self.setIconSize(self.THUMB_SIZE if enabled else QSize(0, 0))
+        self.setGridSize(self.GRID_SIZE if enabled else QSize())
+        self.setSpacing(14 if enabled else 2)
+        self.setProperty(
+            "dropHint",
+            "拖拽 PDF 到此处，浏览模式支持拖动缩略图排序"
+            if enabled
+            else "支持拖拽多个 PDF 到此处",
+        )
+        for row in range(self.count()):
+            self._refresh_item(self.item(row))
+        self._drop_indicator.hide()
+        self._update_overlay()
+        self.viewport().update()
+
+    def add_pdf(self, path):
+        item = QListWidgetItem()
+        item.setData(Qt.UserRole, str(path))
+        item.setData(Qt.UserRole + 1, self.pdf_page_count(path))
+        item.setToolTip(str(path))
+        item.setFlags(item.flags() | Qt.ItemIsDragEnabled | Qt.ItemIsDropEnabled)
+        self._refresh_item(item)
+        self.addItem(item)
+        return item
+
+    def contains_path(self, path):
+        needle = str(path)
+        for row in range(self.count()):
+            if self.item(row).data(Qt.UserRole) == needle:
+                return True
+        return False
+
+    def file_paths(self):
+        return [self.item(row).data(Qt.UserRole) for row in range(self.count())]
+
+    def remove_current_item(self):
+        item = self.currentItem()
+        if item is None:
+            return
+        self.takeItem(self.row(item))
+        self._update_overlay()
+
+    def remove_selected_items(self):
+        rows = sorted((self.row(item) for item in self.selectedItems()), reverse=True)
+        for row in rows:
+            self.takeItem(row)
+        self._update_overlay()
+
+    def clear(self):
+        super().clear()
+        self._overlay.hide()
+        self._drop_indicator.hide()
+
+    def dragEnterEvent(self, event):
+        if self._event_pdf_files(event):
+            event.acceptProposedAction()
+            return
+        if self._browse_mode and self._is_internal_item_drag(event):
+            self._show_drop_indicator(event)
+            event.setDropAction(Qt.MoveAction)
+            event.accept()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if self._event_pdf_files(event):
+            event.acceptProposedAction()
+            return
+        if self._browse_mode and self._is_internal_item_drag(event):
+            self._show_drop_indicator(event)
+            event.setDropAction(Qt.MoveAction)
+            event.accept()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        files = self._event_pdf_files(event)
+        if files:
+            self.files_dropped.emit(files)
+            event.acceptProposedAction()
+            return
+        if self._browse_mode and self._is_internal_item_drag(event):
+            self._move_selected_to_drop_position(event)
+            self._drop_indicator.hide()
+            event.setDropAction(Qt.MoveAction)
+            event.accept()
+            return
+        super().dropEvent(event)
+        self._drop_indicator.hide()
+        self._update_overlay()
+
+    def supportedDropActions(self):
+        return Qt.CopyAction | Qt.MoveAction
+
+    def dragLeaveEvent(self, event):
+        self._drop_indicator.hide()
+        super().dragLeaveEvent(event)
+
+    def startDrag(self, supported_actions):
+        if not self._browse_mode or not self.selectedItems():
+            super().startDrag(supported_actions)
+            return
+
+        self._overlay.hide()
+        self._drop_indicator.hide()
+
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData(self.INTERNAL_REORDER_MIME, b"1")
+        drag.setMimeData(mime)
+
+        current = self.currentItem() or self.selectedItems()[0]
+        icon = current.icon()
+        if not icon.isNull():
+            drag.setPixmap(icon.pixmap(QSize(120, 90)))
+
+        drag.exec(Qt.MoveAction, Qt.MoveAction)
+        self._drop_indicator.hide()
+        self._update_overlay()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._drop_indicator.hide()
+        self._update_overlay()
+
+    def scrollContentsBy(self, dx, dy):
+        super().scrollContentsBy(dx, dy)
+        self._drop_indicator.hide()
+        self._update_overlay()
+
+    def _refresh_item(self, item):
+        path = item.data(Qt.UserRole)
+        name = Path(path).name if path else ""
+        if self._browse_mode:
+            item.setText(name)
+            item.setIcon(QIcon(self.render_pdf_thumbnail(path, self.THUMB_SIZE)))
+            item.setTextAlignment(Qt.AlignHCenter)
+            item.setSizeHint(self.GRID_SIZE)
+        else:
+            item.setText(path or name)
+            item.setIcon(QIcon())
+            item.setTextAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+            item.setSizeHint(QSize())
+
+    def _preview_current_item(self):
+        item = self.currentItem()
+        if item is None:
+            return
+        path = item.data(Qt.UserRole)
+        if path:
+            self.preview_requested.emit(path)
+
+    def _preview_double_clicked_item(self, item):
+        self.setCurrentItem(item)
+        self._preview_current_item()
+
+    def _expand_current_item(self):
+        item = self.currentItem()
+        if item is None:
+            return
+        path = item.data(Qt.UserRole)
+        if path:
+            self.expand_requested.emit(path)
+
+    def _is_internal_item_drag(self, event):
+        if not self.selectedItems():
+            return False
+        source = event.source() if hasattr(event, "source") else None
+        if source is self:
+            return True
+        mime = event.mimeData()
+        return bool(mime and mime.hasFormat(self.INTERNAL_REORDER_MIME))
+
+    def _move_selected_to_drop_position(self, event):
+        rows = sorted({self.row(item) for item in self.selectedItems()})
+        if not rows:
+            return
+
+        target_row = self._drop_target_row(event)
+        moving = []
+        current_path = self.currentItem().data(Qt.UserRole) if self.currentItem() else None
+        for row in reversed(rows):
+            moving.insert(0, self.takeItem(row))
+            if row < target_row:
+                target_row -= 1
+
+        target_row = max(0, min(target_row, self.count()))
+        for offset, item in enumerate(moving):
+            self.insertItem(target_row + offset, item)
+            item.setSelected(True)
+
+        if current_path:
+            for row in range(self.count()):
+                item = self.item(row)
+                if item.data(Qt.UserRole) == current_path:
+                    self.setCurrentItem(item)
+                    break
+        else:
+            self.setCurrentItem(moving[0])
+        self._update_overlay()
+
+    def _drop_target_row(self, event):
+        pos = event.position().toPoint() if hasattr(event, "position") else event.pos()
+        for row in range(self.count()):
+            rect = self.visualItemRect(self.item(row))
+            if not rect.isValid():
+                continue
+            if pos.y() < rect.top():
+                return row
+            if rect.top() <= pos.y() <= rect.bottom() and pos.x() < rect.center().x():
+                return row
+        return self.count()
+
+    def _show_drop_indicator(self, event):
+        geometry = self._drop_indicator_geometry(self._drop_target_row(event))
+        if geometry is None:
+            self._drop_indicator.hide()
+            return
+        self._drop_indicator.setGeometry(*geometry)
+        self._drop_indicator.raise_()
+        self._drop_indicator.show()
+
+    def _drop_indicator_geometry(self, target_row):
+        if self.count() == 0:
+            return None
+
+        line_width = 8
+        if target_row < self.count():
+            rect = self.visualItemRect(self.item(target_row))
+            if not rect.isValid():
+                return None
+            x = max(0, rect.left() - line_width - 3)
+        else:
+            rect = self.visualItemRect(self.item(self.count() - 1))
+            if not rect.isValid():
+                return None
+            x = min(self.viewport().width() - line_width, rect.right() + 10)
+
+        y = rect.top() + 10
+        height = max(74, rect.height() - 20)
+        return x, y, line_width, height
+
+    def _update_overlay(self):
+        if not self._browse_mode or self.currentItem() is None:
+            self._overlay.hide()
+            return
+        rect = self.visualItemRect(self.currentItem())
+        if not rect.isValid() or rect.bottom() < 0 or rect.top() > self.viewport().height():
+            self._overlay.hide()
+            return
+        page_count = self.currentItem().data(Qt.UserRole + 1) or 1
+        show_expand = page_count > 1
+        self._expand_btn.setVisible(show_expand)
+        self._overlay.setFixedSize(58, 138 if show_expand else 92)
+        x = max(rect.left() + 6, rect.right() - self._overlay.width() - 8)
+        y = rect.top() + 8
+        self._overlay.move(x, y)
+        self._overlay.raise_()
+        self._overlay.show()
+
+    @staticmethod
+    def pdf_page_count(path):
+        try:
+            fitz = _import_fitz()
+            with fitz.open(str(path)) as doc:
+                return doc.page_count
+        except Exception:
+            return 1
+
+    @staticmethod
+    def render_pdf_thumbnail(path, target_size, page_index=0):
+        pixmap = QPixmap(target_size)
+        pixmap.fill(QColor("#f8fafc"))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QColor("#c5ced8"))
+        painter.setBrush(QColor("#ffffff"))
+        page_rect = pixmap.rect().adjusted(12, 8, -12, -8)
+        painter.drawRect(page_rect)
+        painter.setPen(QColor("#8a98a8"))
+        painter.drawText(page_rect, Qt.AlignCenter, "PDF")
+        painter.end()
+
+        try:
+            fitz = _import_fitz()
+            with fitz.open(str(path)) as doc:
+                if doc.page_count < 1:
+                    return pixmap
+                page_index = max(0, min(page_index, doc.page_count - 1))
+                page = doc.load_page(page_index)
+                rect = page.rect
+                scale = min(
+                    target_size.width() / max(rect.width, 1),
+                    target_size.height() / max(rect.height, 1),
+                    3,
+                )
+                rendered = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
+                fmt = QImage.Format_RGB888 if rendered.n < 4 else QImage.Format_RGBA8888
+                image = QImage(rendered.samples, rendered.width, rendered.height, rendered.stride, fmt).copy()
+                page_pixmap = QPixmap.fromImage(image).scaled(
+                    target_size,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                )
+        except Exception:
+            return pixmap
+
+        pixmap.fill(QColor("#f8fafc"))
+        painter = QPainter(pixmap)
+        x = (target_size.width() - page_pixmap.width()) // 2
+        y = (target_size.height() - page_pixmap.height()) // 2
+        painter.drawPixmap(x, y, page_pixmap)
+        painter.setPen(QColor("#d0d7de"))
+        painter.drawRect(x, y, page_pixmap.width() - 1, page_pixmap.height() - 1)
+        painter.end()
+        return pixmap
+
+
+class NoNativeSelectionDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        clean = QStyleOptionViewItem(option)
+        clean.state &= ~QStyle.State_Selected
+        clean.state &= ~QStyle.State_HasFocus
+        clean.state &= ~QStyle.State_MouseOver
+        super().paint(painter, clean, index)
+
+
+class PdfPagePreviewListWidget(QListWidget):
+    preview_page_requested = Signal(str, int)
+
+    PAGE_SIZE = QSize(170, 220)
+    TILE_SIZE = QSize(190, 258)
+    GRID_SIZE = QSize(210, 280)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._pdf_path = ""
+        self.setViewMode(QListView.IconMode)
+        self.setResizeMode(QListView.Adjust)
+        self.setMovement(QListView.Static)
+        self.setWrapping(True)
+        self.setIconSize(self.TILE_SIZE)
+        self.setGridSize(self.GRID_SIZE)
+        self.setSpacing(18)
+        self.setWordWrap(True)
+        self.setSelectionMode(QListWidget.SingleSelection)
+        self.setItemDelegate(NoNativeSelectionDelegate(self))
+        self.setStyleSheet(
+            """
+            QListWidget {
+                background:#eeeeee;
+                border:1px solid #dfe6e9;
+                padding:18px;
+                font-size:13px;
+            }
+            QListWidget::item {
+                background:transparent;
+                border:none;
+                color:#2d3436;
+            }
+            QListWidget::item:selected {
+                background:transparent;
+                border:none;
+                color:#2d3436;
+            }
+            QListWidget::item:selected:active,
+            QListWidget::item:selected:!active,
+            QListWidget::item:hover,
+            QListWidget::item:focus {
+                background:transparent;
+                border:none;
+                outline:none;
+            }
+            """
+        )
+
+        self._overlay = QFrame(self.viewport())
+        self._overlay.setObjectName("pdfPageOverlay")
+        self._overlay.setFixedSize(58, 48)
+        self._overlay.setStyleSheet(
+            """
+            QFrame#pdfPageOverlay {
+                background:#ffffff;
+                border:1px solid #a9b4bf;
+                border-radius:4px;
+            }
+            QToolButton {
+                border:none;
+                padding:4px;
+                color:#4b5563;
+                font-size:12px;
+            }
+            QToolButton:hover { background:#edf5ff; color:#0984e3; }
+            """
+        )
+        overlay_layout = QVBoxLayout(self._overlay)
+        overlay_layout.setContentsMargins(4, 4, 4, 4)
+        self._preview_btn = QToolButton(self._overlay)
+        self._preview_btn.setToolTip("放大预览")
+        self._preview_btn.setText("放大")
+        self._preview_btn.setIcon(self.style().standardIcon(QStyle.SP_FileDialogContentsView))
+        self._preview_btn.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+        overlay_layout.addWidget(self._preview_btn)
+        self._overlay.hide()
+
+        self.itemSelectionChanged.connect(self._update_overlay)
+        self.itemDoubleClicked.connect(self._preview_double_clicked_page)
+        self._preview_btn.clicked.connect(self._preview_current_page)
+
+    def load_pdf(self, path):
+        self._pdf_path = str(path)
+        self.clear()
+        page_count = PdfMergeListWidget.pdf_page_count(path)
+        for page_index in range(page_count):
+            item = QListWidgetItem("")
+            item.setData(Qt.UserRole, page_index)
+            item.setIcon(QIcon(self._render_page_tile(path, page_index)))
+            item.setTextAlignment(Qt.AlignHCenter)
+            item.setSizeHint(self.GRID_SIZE)
+            item.setToolTip(f"第 {page_index + 1} 页")
+            self.addItem(item)
+        self._overlay.hide()
+
+    def clear(self):
+        super().clear()
+        if hasattr(self, "_overlay"):
+            self._overlay.hide()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        self._paint_selected_frame()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._update_overlay()
+
+    def scrollContentsBy(self, dx, dy):
+        super().scrollContentsBy(dx, dy)
+        self._update_overlay()
+
+    def _paint_selected_frame(self):
+        item = self.currentItem()
+        if item is None:
+            return
+        rect = self.visualItemRect(item)
+        if not rect.isValid() or rect.bottom() < 0 or rect.top() > self.viewport().height():
+            return
+        frame_width = min(self.TILE_SIZE.width() + 8, rect.width() - 6)
+        frame_height = min(self.TILE_SIZE.height() + 8, rect.height() - 6)
+        frame_left = rect.left() + (rect.width() - frame_width) // 2
+        frame = QRect(frame_left, rect.top() + 3, frame_width, frame_height)
+        painter = QPainter(self.viewport())
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(QColor("#0984e3"))
+        painter.setBrush(QColor(219, 234, 254, 90))
+        painter.drawRoundedRect(frame, 4, 4)
+        painter.end()
+
+    def _render_page_tile(self, path, page_index):
+        pixmap = QPixmap(self.TILE_SIZE)
+        pixmap.fill(QColor("#eeeeee"))
+
+        page_pixmap = PdfMergeListWidget.render_pdf_thumbnail(path, self.PAGE_SIZE, page_index)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        x = (self.TILE_SIZE.width() - page_pixmap.width()) // 2
+        painter.drawPixmap(x, 0, page_pixmap)
+        painter.setPen(QColor("#2d3436"))
+        painter.drawText(
+            0,
+            self.PAGE_SIZE.height() + 8,
+            self.TILE_SIZE.width(),
+            self.TILE_SIZE.height() - self.PAGE_SIZE.height() - 8,
+            Qt.AlignHCenter | Qt.AlignTop,
+            str(page_index + 1),
+        )
+        painter.end()
+        return pixmap
+
+    def _preview_current_page(self):
+        item = self.currentItem()
+        if item is None or not self._pdf_path:
+            return
+        self.preview_page_requested.emit(self._pdf_path, item.data(Qt.UserRole))
+
+    def _preview_double_clicked_page(self, item):
+        self.setCurrentItem(item)
+        self._preview_current_page()
+
+    def _update_overlay(self):
+        item = self.currentItem()
+        if item is None:
+            self._overlay.hide()
+            self.viewport().update()
+            return
+        rect = self.visualItemRect(item)
+        if not rect.isValid() or rect.bottom() < 0 or rect.top() > self.viewport().height():
+            self._overlay.hide()
+            self.viewport().update()
+            return
+        x = max(rect.left() + 6, rect.right() - self._overlay.width() - 8)
+        y = rect.top() + 8
+        self._overlay.move(x, y)
+        self._overlay.raise_()
+        self._overlay.show()
+        self.viewport().update()
+
+
 class PdfDropLineEdit(QLineEdit):
     file_dropped = Signal(str)
 
@@ -393,7 +992,7 @@ class PDFToolBox(QWidget):
 
         file_group = QGroupBox("输入 PDF 文件")
         file_layout = QVBoxLayout(file_group)
-        self.merge_list = PdfDropListWidget()
+        self.merge_list = PdfMergeListWidget()
         self.merge_list.setSelectionMode(QListWidget.ExtendedSelection)
         self.merge_list.setToolTip("可拖拽多个 PDF 文件到这里")
         file_layout.addWidget(self.merge_list)
@@ -404,10 +1003,18 @@ class PDFToolBox(QWidget):
         clear_btn = QPushButton("清空")
         up_btn = QPushButton("上移")
         down_btn = QPushButton("下移")
+        self.merge_browse_btn = QPushButton("浏览")
+        self.merge_list_btn = QPushButton("列表")
+        for btn in (self.merge_browse_btn, self.merge_list_btn):
+            btn.setCheckable(True)
+            btn.setStyleSheet(self._secondary_btn())
         for btn in (add_btn, remove_btn, clear_btn, up_btn, down_btn):
             btn.setStyleSheet(self._secondary_btn())
             btn_row.addWidget(btn)
         btn_row.addStretch()
+        btn_row.addWidget(QLabel("显示模式"))
+        btn_row.addWidget(self.merge_browse_btn)
+        btn_row.addWidget(self.merge_list_btn)
         file_layout.addLayout(btn_row)
         layout.addWidget(file_group, 1)
 
@@ -419,11 +1026,16 @@ class PDFToolBox(QWidget):
         layout.addWidget(run, alignment=Qt.AlignRight)
 
         add_btn.clicked.connect(self._add_merge_files)
-        remove_btn.clicked.connect(lambda: self._remove_selected(self.merge_list))
+        remove_btn.clicked.connect(self.merge_list.remove_selected_items)
         clear_btn.clicked.connect(self.merge_list.clear)
         up_btn.clicked.connect(lambda: self._move_selected(self.merge_list, -1))
         down_btn.clicked.connect(lambda: self._move_selected(self.merge_list, 1))
         self.merge_list.files_dropped.connect(self._handle_merge_files)
+        self.merge_list.preview_requested.connect(self._preview_merge_pdf)
+        self.merge_list.expand_requested.connect(self._expand_merge_pdf)
+        self.merge_browse_btn.clicked.connect(lambda: self._set_merge_browse_mode(True))
+        self.merge_list_btn.clicked.connect(lambda: self._set_merge_browse_mode(False))
+        self._set_merge_browse_mode(True)
         run.clicked.connect(self._run_merge)
         self.tabs.addTab(tab, "PDF 合并")
 
@@ -515,6 +1127,58 @@ class PDFToolBox(QWidget):
     def _append_log(self, msg):
         self.log_box.append(msg)
 
+    def _set_merge_browse_mode(self, enabled):
+        self.merge_list.set_browse_mode(enabled)
+        self.merge_browse_btn.setChecked(enabled)
+        self.merge_list_btn.setChecked(not enabled)
+
+    def _preview_merge_pdf(self, path, page_index=0):
+        dialog = QDialog(self)
+        suffix = f" - 第 {page_index + 1} 页" if page_index else ""
+        dialog.setWindowTitle(Path(path).name + suffix)
+        dialog.resize(860, 720)
+
+        layout = QVBoxLayout(dialog)
+        title = QLabel(f"{path}    第 {page_index + 1} 页")
+        title.setStyleSheet("font-size:13px;color:#2d3436;")
+        layout.addWidget(title)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        preview = QLabel()
+        preview.setAlignment(Qt.AlignCenter)
+        preview.setStyleSheet("background:#f8fafc;border:1px solid #dfe6e9;")
+        preview.setPixmap(PdfMergeListWidget.render_pdf_thumbnail(path, QSize(760, 980), page_index))
+        scroll.setWidget(preview)
+        layout.addWidget(scroll, 1)
+
+        close_btn = QPushButton("关闭")
+        close_btn.setStyleSheet(self._secondary_btn())
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignRight)
+        dialog.exec()
+
+    def _expand_merge_pdf(self, path):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"{Path(path).name} - 展开预览")
+        dialog.resize(980, 720)
+
+        layout = QVBoxLayout(dialog)
+        title = QLabel(str(path))
+        title.setStyleSheet("font-size:13px;color:#2d3436;")
+        layout.addWidget(title)
+
+        page_list = PdfPagePreviewListWidget()
+        page_list.load_pdf(path)
+        page_list.preview_page_requested.connect(self._preview_merge_pdf)
+        layout.addWidget(page_list, 1)
+
+        close_btn = QPushButton("关闭")
+        close_btn.setStyleSheet(self._secondary_btn())
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignRight)
+        dialog.exec()
+
     def _add_merge_files(self):
         files, _ = QFileDialog.getOpenFileNames(self, "选择 PDF 文件", "", "PDF Files (*.pdf)")
         self._handle_merge_files(files)
@@ -525,9 +1189,11 @@ class PDFToolBox(QWidget):
             return
         added = 0
         for file in files:
-            if not self._list_contains(self.merge_list, file):
-                self.merge_list.addItem(file)
+            if not self.merge_list.contains_path(file):
+                self.merge_list.add_pdf(file)
                 added += 1
+        if len(files) > 1:
+            self._set_merge_browse_mode(True)
         if not self.merge_output.text().strip():
             first = Path(files[0])
             self.merge_output.setText(str(first.with_name(first.stem + "_合并.pdf")))
@@ -578,7 +1244,7 @@ class PDFToolBox(QWidget):
             self.nup_output.setText(self._ensure_pdf_suffix(path))
 
     def _run_merge(self):
-        files = [self.merge_list.item(i).text() for i in range(self.merge_list.count())]
+        files = self.merge_list.file_paths()
         output = self.merge_output.text().strip()
         if not files or not output:
             QMessageBox.warning(self, "提示", "请选择输入 PDF 并设置输出文件。")
