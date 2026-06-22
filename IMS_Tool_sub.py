@@ -208,7 +208,7 @@ class ConfigDiffDialog(QDialog):
         btn_accept = QPushButton("接受此修改"); btn_accept.setStyleSheet("QPushButton{background:#27ae60;color:white;font-weight:bold;padding:10px 32px;border:none;border-radius:6px;font-size:14px;}QPushButton:hover{background:#219a52;}")
         btn_reject = QPushButton("保留旧版"); btn_reject.setStyleSheet("QPushButton{background:#e67e22;color:white;font-weight:bold;padding:10px 32px;border:none;border-radius:6px;font-size:14px;}QPushButton:hover{background:#d35400;}")
         btn_all_acc = QPushButton("全部接受"); btn_all_acc.setStyleSheet("QPushButton{font-size:11px;padding:6px 16px;border:1px solid #0984e3;color:#0984e3;border-radius:4px;background:white;}QPushButton:hover{background:#0984e3;color:white;}")
-        btn_all_rej = QPushButton("全部拒绝"); btn_all_rej.setStyleSheet("QPushButton{font-size:11px;padding:6px 16px;border:1px solid #e74c3c;color:#e74c3c;border-radius:4px;background:white;}QPushButton:hover{background:#e74c3c;color:white;}")
+        btn_all_rej = QPushButton("全部旧版"); btn_all_rej.setStyleSheet("QPushButton{font-size:11px;padding:6px 16px;border:1px solid #e74c3c;color:#e74c3c;border-radius:4px;background:white;}QPushButton:hover{background:#e74c3c;color:white;}")
         btn_accept.clicked.connect(self._on_accept)
         btn_reject.clicked.connect(self._on_reject)
         btn_all_acc.clicked.connect(self._on_accept_all)
