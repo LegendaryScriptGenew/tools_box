@@ -1106,10 +1106,12 @@ class CreateContainerDialog(QDialog):
         self.create_btn.setEnabled(ok)
 
     def _do_create(self):
-        cmd = "docker run -d"
+        cmd = "docker run -tid"
+        cmd += " -e \"container=docker\""
         name = self.cont_name.text().strip() or self.cont_hostname.text().strip()
         cmd += f" --name {name}"
         cmd += f" --hostname {self.cont_hostname.text().strip()}"
+        cmd += " --privileged"
         cmd += f" --restart {self.cont_restart.currentText().strip()}"
         net = self.cont_net.currentText().strip()
         cmd += f" --network {net}"
@@ -1137,7 +1139,7 @@ class CreateContainerDialog(QDialog):
                 if v:
                     cmd += f" -v {v}"
         image = self.cont_image.currentText().strip()
-        cmd += f" {image}"
+        cmd += f" {image} /usr/sbin/init"
         if self.nic2_cb.isChecked():
             n2_net = self.nic2_net.currentText().strip()
             if n2_net:
