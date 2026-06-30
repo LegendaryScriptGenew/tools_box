@@ -38,7 +38,7 @@ class PasswdTool(QWidget):
         super().__init__()
         self.lang = lang
         self._init_logging()
-        
+
         title = "Password Generator" if self.lang == "en" else self._tr("密码生成器", "Password Generator")
         self.setWindowTitle(title)
         self.resize(820, 620)
@@ -68,6 +68,11 @@ class PasswdTool(QWidget):
         self._build_single_tab()
         self._build_batch_tab()
         self._build_excel_tab()
+
+    def _tr(self, zh: str, en: str) -> str:
+        """根据当前语言返回对应文本"""
+        return en if self.lang == "en" else zh
+
 
     def _init_logging(self):
         log_dir = os.path.join(os.path.dirname(__file__), "logs")

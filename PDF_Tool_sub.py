@@ -1427,7 +1427,7 @@ class PDFToolBox(QWidget):
         self.lang = lang
         self._thread = None
         self._worker = None
-        
+
         title = "PDF Tools" if self.lang == "en" else "PDF 工具集"
         self.setWindowTitle(title)
         self.resize(1280, 860)
@@ -1530,6 +1530,10 @@ class PDFToolBox(QWidget):
             "border:1px solid #d0d0d0;border-radius:4px;font-size:13px;}"
             "QPushButton:hover{background:#f0f2f5;}"
         )
+
+    def _tr(self, zh: str, en: str) -> str:
+        """根据当前语言返回对应文本"""
+        return en if self.lang == "en" else zh
 
     def _path_row(self, label, line_edit, browse_func):
         row = QHBoxLayout()
