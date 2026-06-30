@@ -538,12 +538,13 @@ class CheckboxHeader(QHeaderView):
 class ClientDetectThread(QThread):
     result = Signal(str, str, str, bool, str, str, bool)  # ip, os_type, version, yum_ok, yum_url, url_type, connected
 
-    def __init__(self, ip: str, port: int, user: str, pwd: str, parent=None):
+    def __init__(self, ip: str, port: int, user: str, pwd: str, deep_check: bool = False, parent=None):
         super().__init__(parent)
         self.ip = ip
         self.port = port
         self.user = user
         self.pwd = pwd
+        self.deep_check = deep_check  # 是否执行完整 yum 验证
 
     def run(self):
         ssh = paramiko.SSHClient()
@@ -559,11 +560,23 @@ class ClientDetectThread(QThread):
                         password=self.pwd, timeout=15)
             connected = True
 
-            _, stdout, _ = ssh.exec_command("cat /etc/os-release", timeout=10)
+            # ---- 并行获取 OS 信息 + repo 数量 + baseurl ----
+            _, stdout, _ = ssh.exec_command(
+                "cat /etc/os-release 2>/dev/null; echo '---SPLIT---'; "
+                "ls /etc/yum.repos.d/*.repo 2>/dev/null | wc -l; echo '---SPLIT---'; "
+                "grep -h '^baseurl=' /etc/yum.repos.d/*.repo 2>/dev/null | head -1",
+                timeout=10
+            )
             out = stdout.read().decode('utf-8', errors='replace')
+            parts = out.split('---SPLIT---')
+            os_text = parts[0].strip() if len(parts) > 0 else ""
+            repo_count_str = parts[1].strip() if len(parts) > 1 else "0"
+            baseurl_raw = parts[2].strip() if len(parts) > 2 else ""
+
+            # 解析 OS 类型和版本
             pretty = ""
             ver_id = ""
-            for line in out.split('\n'):
+            for line in os_text.split('\n'):
                 line = line.strip()
                 if line.startswith('PRETTY_NAME='):
                     pretty = line.split('=', 1)[1].strip('"\'')
@@ -587,39 +600,10 @@ class ClientDetectThread(QThread):
             nums = re.findall(r'(\d[\d.]*)', ver_id)
             version = nums[0] if nums else ver_id
 
-            # 1) 检查 .repo 文件是否存在
-            _, stdout_r, _ = ssh.exec_command(
-                "ls /etc/yum.repos.d/*.repo 2>/dev/null | wc -l", timeout=10
-            )
-            repo_count = int(stdout_r.read().decode('utf-8', errors='replace').strip() or 0)
-
-            # 2) 完整检测 yum 是否可用：清缓存 → 下载元数据 → 验证包可获取
-            _, stdout2, _ = ssh.exec_command(
-                "yum clean all 2>/dev/null; yum makecache 2>&1; yum install -y --downloadonly chrony 2>&1; echo __RC__$?",
-                timeout=180
-            )
-            out2 = stdout2.read().decode('utf-8', errors='replace')
-            # 解析最后一行 __RC__N
-            exit_code = -1
-            for line in reversed(out2.strip().split('\n')):
-                m = re.match(r'__RC__(\d+)', line.strip())
-                if m:
-                    exit_code = int(m.group(1))
-                    break
-
-            yum_ok = False
-            if repo_count > 0 and exit_code == 0:
-                yum_ok = True
-
-            # 检测当前 yum 源地址
-            _, stdout3, _ = ssh.exec_command(
-                "grep -h '^baseurl=' /etc/yum.repos.d/*.repo 2>/dev/null | head -1",
-                timeout=10
-            )
-            raw = stdout3.read().decode('utf-8', errors='replace').strip()
-            if raw:
-                # 提取 baseurl= 之后的地址
-                url = raw.split('=', 1)[1].strip() if '=' in raw else raw
+            # 解析 baseurl
+            repo_count = int(repo_count_str or 0)
+            if baseurl_raw:
+                url = baseurl_raw.split('=', 1)[1].strip() if '=' in baseurl_raw else baseurl_raw
                 yum_url = url
                 if url.startswith('http://') or url.startswith('https://'):
                     url_type = "🌐 远程"
@@ -628,6 +612,36 @@ class ClientDetectThread(QThread):
             else:
                 yum_url = "无 .repo"
                 url_type = "未知"
+
+            # ---- yum 可用性检测 ----
+            if repo_count > 0:
+                if self.deep_check:
+                    # 深度检测：完整 yum 验证 (clean + makecache + download)
+                    _, stdout2, _ = ssh.exec_command(
+                        "yum clean all 2>/dev/null; yum makecache 2>&1; "
+                        "yum install -y --downloadonly chrony 2>&1; echo __RC__$?",
+                        timeout=180
+                    )
+                    out2 = stdout2.read().decode('utf-8', errors='replace')
+                    exit_code = -1
+                    for line in reversed(out2.strip().split('\n')):
+                        m = re.match(r'__RC__(\d+)', line.strip())
+                        if m:
+                            exit_code = int(m.group(1))
+                            break
+                    yum_ok = (exit_code == 0)
+                else:
+                    # 快速检测：仅检查 yum repolist 是否能正常列出仓库
+                    _, stdout2, _ = ssh.exec_command(
+                        "yum repolist 2>&1 | grep -c '^[a-zA-Z]' || echo 0",
+                        timeout=30
+                    )
+                    repolist_out = stdout2.read().decode('utf-8', errors='replace').strip()
+                    try:
+                        enabled_repos = int(repolist_out)
+                        yum_ok = enabled_repos > 0
+                    except ValueError:
+                        yum_ok = False
 
         except Exception:
             connected = False
@@ -2101,6 +2115,16 @@ class MainWindow(QMainWindow):
         bottom_row.addWidget(self.btn_client_detect)
         bottom_row.addSpacing(12)
         bottom_row.addWidget(self.btn_client_deploy)
+        bottom_row.addSpacing(12)
+        self.chk_client_deep_check = QCheckBox("深度检测（完整验证yum可用性，较慢）")
+        self.chk_client_deep_check.setStyleSheet("""
+            QCheckBox { font-size: 11px; color: #636e72; }
+        """)
+        self.chk_client_deep_check.setToolTip(
+            "勾选后将执行 yum clean all + makecache + install --downloadonly 完整验证\n"
+            "不勾选则仅执行 yum repolist 快速检测（推荐）"
+        )
+        bottom_row.addWidget(self.chk_client_deep_check)
         bottom_row.addStretch()
         layout.addLayout(bottom_row)
 
@@ -2279,7 +2303,8 @@ class MainWindow(QMainWindow):
                 self.client_table.topLevelItem(row_idx).setCheckState(0, Qt.Checked)
                 detect_targets.append((row_idx, host, port, user, pwd))
                 added += 1
-            self._log(f"📥 已导入 {added} 个客户端{'，跳过 ' + str(skipped) + ' 个重复 IP' if skipped else ''}，开始自动检测...")
+            mode = "深度检测" if self.chk_client_deep_check.isChecked() else "快速检测"
+            self._log(f"📥 已导入 {added} 个客户端{'，跳过 ' + str(skipped) + ' 个重复 IP' if skipped else ''}，开始自动{mode}...")
             self._update_client_action_buttons()
             self._refresh_system_filter()
             self._start_detection(detect_targets)
@@ -2444,10 +2469,12 @@ class MainWindow(QMainWindow):
             return
         self._start_detection(targets)
 
-    def _start_detection(self, targets: list):
+    def _start_detection(self, targets: list, deep_check: bool = None):
         """启动检测，targets 为 [(row_idx, ip, port, user, pwd), ...]"""
         if not targets:
             return
+        if deep_check is None:
+            deep_check = self.chk_client_deep_check.isChecked()
         for ri, ip, port, user, pwd in targets:
             item = self.client_table.topLevelItem(ri)
             if item:
@@ -2457,12 +2484,12 @@ class MainWindow(QMainWindow):
         self._detect_active = 0
         self._detect_max = 5
         self._detect_threads = []
-        self._launch_detect()
+        self._launch_detect(deep_check)
 
-    def _launch_detect(self):
+    def _launch_detect(self, deep_check: bool = False):
         while self._detect_active < self._detect_max and self._detect_queue:
             row_idx, ip, port, user, pwd = self._detect_queue.pop(0)
-            t = ClientDetectThread(ip, port, user, pwd)
+            t = ClientDetectThread(ip, port, user, pwd, deep_check=deep_check)
             t.result.connect(lambda ip2, ot, ver, yum_ok, url, url_t, conn: self._on_detect_done(ip2, ot, ver, yum_ok, url, url_t, conn))
             self._detect_threads.append(t)
             self._detect_active += 1
@@ -2486,9 +2513,10 @@ class MainWindow(QMainWindow):
             self._log(f"❌ {ip} → 连接失败")
 
         if self._detect_queue or self._detect_active > 0:
-            self._launch_detect()
+            self._launch_detect(self.chk_client_deep_check.isChecked())
         else:
-            self._log("✅ 客户端检测完成")
+            mode = "深度检测" if self.chk_client_deep_check.isChecked() else "快速检测"
+            self._log(f"✅ 客户端{mode}完成")
             self._refresh_system_filter()
             self._update_client_action_buttons()
             self.btn_client_detect.setEnabled(True)
