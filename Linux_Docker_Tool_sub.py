@@ -1111,7 +1111,7 @@ class CreateContainerDialog(QDialog):
         name = self.cont_name.text().strip() or self.cont_hostname.text().strip()
         cmd += f" --name {name}"
         cmd += f" --hostname {self.cont_hostname.text().strip()}"
-        cmd += " --privileged"
+        cmd += " --privileged --cap-drop=SYS_BOOT"
         cmd += f" --restart {self.cont_restart.currentText().strip()}"
         net = self.cont_net.currentText().strip()
         cmd += f" --network {net}"
@@ -2315,7 +2315,7 @@ class BatchImportDialog(QDialog):
         cmd = "docker run -tid"
         cmd += " -e \"container=docker\""
         cmd += f" --name {name} --hostname {hostname}"
-        cmd += " --privileged"
+        cmd += " --privileged --cap-drop=SYS_BOOT"
         cmd += f" --restart {restart}"
         cmd += f" --network={net}"
         if ip:
