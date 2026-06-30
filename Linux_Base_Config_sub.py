@@ -277,7 +277,7 @@ class LogDialog(QDialog):
         te.setStyleSheet("background: #2d3436; color: #dfe6e9; font-family: Consolas; font-size: 12px; padding: 10px; border-radius: 4px;")
         te.setPlainText("\n".join(logs))
         vl.addWidget(te)
-        btn = QPushButton("关闭")
+        btn = QPushButton("Close" if self.lang == "en" else "关闭")
         btn.setStyleSheet(STYLE_BTN_SECONDARY)
         btn.clicked.connect(self.accept)
         vl.addWidget(btn, 0, Qt.AlignRight)
@@ -315,9 +315,11 @@ class CheckboxHeader(QHeaderView):
 
 # ── 主窗口 ─────────────────────────────────────────────────
 class LinuxBaseConfig(QWidget):
-    def __init__(self):
+    def __init__(self, lang="zh"):
         super().__init__()
-        self.setWindowTitle("🛡 远程多主机系统初始化配置工具 v3.2.7")
+        self.lang = lang
+        title = "Server Initialization Tool v3.2.7" if self.lang == "en" else "🛡 远程多主机系统初始化配置工具 v3.2.7"
+        self.setWindowTitle(title)
         self.setMinimumSize(1100, 680)
         self.resize(1350, 750)
 
@@ -343,6 +345,10 @@ class LinuxBaseConfig(QWidget):
 
         self._build_ui()
 
+    def _tr(self, zh, en):
+        """根据 self.lang 返回对应文本"""
+        return en if self.lang == 'en' else zh
+
     def _build_ui(self):
         vl = QVBoxLayout(self)
         vl.setContentsMargins(12, 12, 12, 12)
@@ -350,21 +356,21 @@ class LinuxBaseConfig(QWidget):
 
         # ── 顶部工具栏 ──
         tool_row = QHBoxLayout()
-        import_btn = QPushButton("📂 导入服务器列表 (Excel)")
+        import_btn = QPushButton("📂 Import Server List (Excel)" if self.lang == "en" else self._tr("📂 导入服务器列表 (Excel)", "📂 Import Server List (Excel)"))
         import_btn.setStyleSheet(STYLE_BTN_PRIMARY)
         import_btn.clicked.connect(self._import_excel)
         tool_row.addWidget(import_btn)
 
-        self.path_lbl = QLabel("未导入文件")
+        self.path_lbl = QLabel(self._tr("未导入文件", "No file imported"))
         self.path_lbl.setStyleSheet("color: #636e72;")
         tool_row.addWidget(self.path_lbl, 1)
 
-        add_btn = QPushButton("➕ 手动添加")
+        add_btn = QPushButton("➕ Manual Add" if self.lang == "en" else self._tr("➕ 手动添加", "➕ Manual Add"))
         add_btn.setStyleSheet(STYLE_BTN_SECONDARY)
         add_btn.clicked.connect(self._add_manual)
         tool_row.addWidget(add_btn)
 
-        del_btn = QPushButton("✕ 删除选中")
+        del_btn = QPushButton("✕ Delete Selected" if self.lang == "en" else self._tr("✕ 删除选中", "✕ Delete Selected"))
         del_btn.setStyleSheet(STYLE_BTN_DANGER)
         del_btn.clicked.connect(self._delete_selected)
         tool_row.addWidget(del_btn)
@@ -380,7 +386,7 @@ class LinuxBaseConfig(QWidget):
         left_ly = QVBoxLayout(left_w)
         left_ly.setContentsMargins(10, 10, 10, 10)
 
-        title = QLabel("⚙ 选择要应用的初始化配置")
+        title = QLabel(self._tr("⚙ 选择要应用的初始化配置", "⚙ Select Initialization Config"))
         title_font = QFont("Microsoft YaHei UI")
         title_font.setPixelSize(13)
         title.setFont(title_font)
@@ -389,7 +395,7 @@ class LinuxBaseConfig(QWidget):
         left_ly.addWidget(title)
 
         # 全选三态复选框
-        self._select_all_cb = QCheckBox("全选")
+        self._select_all_cb = QCheckBox(self._tr("全选", "Select All"))
         self._select_all_cb.setTristate(True)
         self._select_all_cb.setChecked(False)
         cb_font = QFont("Microsoft YaHei UI")
@@ -462,13 +468,13 @@ class LinuxBaseConfig(QWidget):
         # ── 底部按钮栏 ──
         bottom = QHBoxLayout()
         bottom.addStretch()
-        self.stop_all_btn = QPushButton("⏹ 停止全部")
+        self.stop_all_btn = QPushButton("⏹ Stop All" if self.lang == "en" else "⏹ 停止全部")
         self.stop_all_btn.setStyleSheet(STYLE_BTN_DANGER)
         self.stop_all_btn.setEnabled(False)
         self.stop_all_btn.clicked.connect(self._stop_all)
         bottom.addWidget(self.stop_all_btn)
 
-        self.run_btn = QPushButton("🚀 一键批量初始化")
+        self.run_btn = QPushButton("🚀 Batch Initialize" if self.lang == "en" else "🚀 一键批量初始化")
         self.run_btn.setStyleSheet(STYLE_BTN_PRIMARY)
         self.run_btn.clicked.connect(self._run_all)
         bottom.addWidget(self.run_btn)
@@ -528,7 +534,7 @@ class LinuxBaseConfig(QWidget):
         total = self._fixed_cols + n_tasks + 1
         self._op_col = total - 1
 
-        headers = ["", "IP地址", "端口", "用户名", "YUM源状态"]
+        headers = ["", self._tr("IP地址", "IP Address"), self._tr("端口", "Port"), self._tr("用户名", "Username"), "YUM源状态"]
         for c in codes:
             headers.append(TASK_META.get(c, c))
         headers.append("操作")

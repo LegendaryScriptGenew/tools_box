@@ -188,6 +188,10 @@ class ConfigDiffDialog(QDialog):
         self._hunk_decisions = []
         self._file_merged = {}
         self._build_ui()
+    def _tr(self, zh, en):
+        """根据 self.lang 返回对应文本"""
+        return en if self.lang == 'en' else zh
+
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
@@ -304,8 +308,9 @@ def _remote_tcpdump_kill_cmd(remote_path):
 # ═══════════════════════════════════════════════
 
 class IMSTool(QWidget):
-    def __init__(self):
+    def __init__(self, lang="zh"):
         super().__init__()
+        self.lang = lang
         self._hosts = _load_hosts()
         self._capturing = False
         self._upgrading = False
@@ -345,7 +350,8 @@ class IMSTool(QWidget):
         return f"QPushButton{{background:{c};color:{_T['text_secondary']};border:1px solid {_T['border']};border-radius:4px;padding:4px 10px;font-size:{_T['font_sm']};}}QPushButton:hover{{background:{_T['border']};}}"
 
     def _init_ui(self):
-        self.setWindowTitle("IMS 工具")
+        title = "IMS Tools" if self.lang == "en" else "IMS 工具"
+        self.setWindowTitle(title)
         self.resize(1400, 900)
         self.setStyleSheet(STYLE_XIAOMI)
 
@@ -926,7 +932,7 @@ class IMSTool(QWidget):
         layout.setSpacing(6)
 
         # Section header
-        header = QLabel("抓包 Capture")
+        header = QLabel("Packet Capture" if self.lang == "en" else "抓包 Capture")
         header.setStyleSheet(f"font-size:{_T['font_lg']};font-weight:bold;color:{_T['text']};padding-bottom:2px;")
         layout.addWidget(header)
 

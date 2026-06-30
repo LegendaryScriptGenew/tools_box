@@ -13,6 +13,54 @@ APP_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else 
 RESOURCE_DIR = getattr(sys, '_MEIPASS', APP_DIR)
 CONFIG_DIR = os.path.join(APP_DIR, "config")
 
+# 语言字典
+LANGUAGES = {
+    "zh": {
+        "window_title": "工具箱",
+        "app_title": "工具箱",
+        "select_tool": "选择一个工具",
+        "select_tool_prompt": "请从左侧列表选择一个工具，查看详情并启动",
+        "launch_button": "🚀  启动工具",
+        "settings_title": "栏位设置",
+        "select_display_tools": "选择显示的工具",
+        "select_all": "全选",
+        "deselect_all": "取消全选",
+        "confirm": "确定",
+        "cancel": "取消",
+        "config_missing": "Config Missing",
+        "config_missing_detail": f"Cannot find config/tools.json.\n\nChecked:\n{CONFIG_DIR}\n{os.path.join(RESOURCE_DIR, 'config')}\n\n"
+            "Please copy the config folder next to the exe, or package it with --add-data config;config.",
+        "tool_config_error": "Tool Config Error",
+        "tool_load_failed": "Tool Load Failed",
+        "tool_start_failed": "Tool Start Failed",
+        "check_log": "Please check the latest log file for details.",
+        "lang_switch": "EN",
+    },
+    "en": {
+        "window_title": "Toolbox",
+        "app_title": "Toolbox",
+        "select_tool": "Select a Tool",
+        "select_tool_prompt": "Please select a tool from the left list to view details and launch",
+        "launch_button": "🚀  Launch Tool",
+        "settings_title": "Settings",
+        "select_display_tools": "Select Tools to Display",
+        "select_all": "Select All",
+        "deselect_all": "Deselect All",
+        "confirm": "OK",
+        "cancel": "Cancel",
+        "config_missing": "Config Missing",
+        "config_missing_detail": f"Cannot find config/tools.json.\n\nChecked:\n{CONFIG_DIR}\n{os.path.join(RESOURCE_DIR, 'config')}\n\n"
+            "Please copy the config folder next to the exe, or package it with --add-data config;config.",
+        "tool_config_error": "Tool Config Error",
+        "tool_load_failed": "Tool Load Failed",
+        "tool_start_failed": "Tool Start Failed",
+        "check_log": "Please check the latest log file for details.",
+        "lang_switch": "中文",
+    }
+}
+
+CURRENT_LANG = "zh"  # 默认中文
+
 
 def _bundled_config_path(filename):
     return os.path.join(RESOURCE_DIR, "config", filename)
@@ -42,7 +90,7 @@ def _ensure_runtime_config():
     for name in os.listdir(bundled_dir):
         src = os.path.join(bundled_dir, name)
         dst = os.path.join(CONFIG_DIR, name)
-        if os.path.isfile(src) and not os.path.exists(dst):
+        if os.path.isfile(src):
             shutil.copy2(src, dst)
 
 
@@ -90,7 +138,9 @@ def rebuild_tool_list(tl, tools, visible_map):
         ilbl = QLabel(t.get("icon", "🔧"))
         ilbl.setStyleSheet("font-size:22px;color:#dfe6e9;")
         iwl.addWidget(ilbl)
-        nlbl = QLabel(t["name"])
+        # 根据当前语言选择显示的名称
+        display_name = t.get("name_en", t["name"]) if CURRENT_LANG == "en" else t["name"]
+        nlbl = QLabel(display_name)
         nlbl.setStyleSheet("font-size:14px;color:#dfe6e9;")
         iwl.addWidget(nlbl)
         iwl.addStretch()
@@ -110,7 +160,9 @@ def _rebuild_item_widgets(tl, tools):
         ilbl = QLabel(t.get("icon", "🔧"))
         ilbl.setStyleSheet("font-size:22px;color:#dfe6e9;")
         iwl.addWidget(ilbl)
-        nlbl = QLabel(t["name"])
+        # 根据当前语言选择显示的名称
+        display_name = t.get("name_en", t["name"]) if CURRENT_LANG == "en" else t["name"]
+        nlbl = QLabel(display_name)
         nlbl.setStyleSheet("font-size:14px;color:#dfe6e9;")
         iwl.addWidget(nlbl)
         iwl.addStretch()
@@ -141,7 +193,7 @@ def _load_config_json(filename, default=None, required=False):
 class ToolSettingsDialog(QDialog):
     def __init__(self, all_tools, visible_map, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("栏位设置")
+        self.setWindowTitle(LANGUAGES[CURRENT_LANG]["settings_title"])
         self.setFixedSize(380, 460)
         self.setStyleSheet("QDialog{background:#f0f2f5;}")
         self._all_tools = all_tools
@@ -157,7 +209,7 @@ class ToolSettingsDialog(QDialog):
         hdr.setStyleSheet("background:#2d3436;")
         hdr_layout = QHBoxLayout(hdr)
         hdr_layout.setContentsMargins(16, 12, 16, 12)
-        hdr_label = QLabel("选择显示的工具")
+        hdr_label = QLabel(LANGUAGES[CURRENT_LANG]["select_display_tools"])
         hdr_label.setStyleSheet("color:white;font-size:15px;font-weight:bold;")
         hdr_layout.addWidget(hdr_label)
         hdr_layout.addStretch()
@@ -167,8 +219,8 @@ class ToolSettingsDialog(QDialog):
         btn_row.setStyleSheet("background:#f0f2f5;")
         btn_layout = QHBoxLayout(btn_row)
         btn_layout.setContentsMargins(16, 10, 16, 10)
-        select_all = QPushButton("全选")
-        deselect_all = QPushButton("取消全选")
+        select_all = QPushButton(LANGUAGES[CURRENT_LANG]["select_all"])
+        deselect_all = QPushButton(LANGUAGES[CURRENT_LANG]["deselect_all"])
         for b in (select_all, deselect_all):
             b.setStyleSheet(
                 "QPushButton{background:white;color:#2d3436;font-size:13px;"
@@ -205,8 +257,8 @@ class ToolSettingsDialog(QDialog):
         bottom.setStyleSheet("background:#f0f2f5;")
         bottom_layout = QHBoxLayout(bottom)
         bottom_layout.setContentsMargins(16, 12, 16, 12)
-        ok_btn = QPushButton("确定")
-        cancel_btn = QPushButton("取消")
+        ok_btn = QPushButton(LANGUAGES[CURRENT_LANG]["confirm"])
+        cancel_btn = QPushButton(LANGUAGES[CURRENT_LANG]["cancel"])
         ok_btn.setStyleSheet(
             "QPushButton{background:#0984e3;color:white;font-size:14px;font-weight:bold;"
             "padding:8px 32px;border:none;border-radius:6px;}"
@@ -276,7 +328,7 @@ if __name__ == "__main__":
     logger.info("工具箱启动")
 
     w = QMainWindow()
-    w.setWindowTitle("工具箱")
+    w.setWindowTitle(LANGUAGES[CURRENT_LANG]["window_title"])
     w.setGeometry(150, 80, 1500, 800)
     w.setMinimumSize(800, 500)
 
@@ -295,7 +347,7 @@ if __name__ == "__main__":
     ti.setStyleSheet("font-size:24px;")
     tll.addWidget(ti)
     tll.addSpacing(10)
-    tt = QLabel("工具箱")
+    tt = QLabel(LANGUAGES[CURRENT_LANG]["app_title"])
     tt.setStyleSheet("color:white;font-size:18px;font-weight:bold;")
     tll.addWidget(tt)
     tll.addStretch()
@@ -307,6 +359,14 @@ if __name__ == "__main__":
         "QPushButton:hover{background:#50575a;}"
     )
     tll.addWidget(settings_btn)
+    lang_btn = QPushButton(LANGUAGES[CURRENT_LANG]["lang_switch"])
+    lang_btn.setFixedSize(36, 36)
+    lang_btn.setStyleSheet(
+        "QPushButton{background:#3d4447;color:white;font-size:14px;"
+        "border:none;border-radius:18px;}"
+        "QPushButton:hover{background:#50575a;}"
+    )
+    tll.addWidget(lang_btn)
     ml.addWidget(tb)
 
     # 主体
@@ -361,7 +421,7 @@ if __name__ == "__main__":
     di.setStyleSheet("font-size:52px;color:#2d3436;")
     cl.addWidget(di)
 
-    dn = QLabel("选择一个工具")
+    dn = QLabel(LANGUAGES[CURRENT_LANG]["select_tool"])
     dn.setStyleSheet("font-size:24px;font-weight:bold;color:#2d3436;")
     cl.addWidget(dn)
 
@@ -370,7 +430,7 @@ if __name__ == "__main__":
     sep.setStyleSheet("background:#ecf0f1;max-height:1px;margin:10px 0 20px 0;")
     cl.addWidget(sep)
 
-    dd = QLabel("请从左侧列表选择一个工具，查看详情并启动")
+    dd = QLabel(LANGUAGES[CURRENT_LANG]["select_tool_prompt"])
     dd.setStyleSheet("font-size:14px;color:#4a4a4a;")
     dd.setWordWrap(True)
     cl.addWidget(dd)
@@ -378,7 +438,7 @@ if __name__ == "__main__":
 
     btn_row = QHBoxLayout()
     btn_row.addStretch()
-    lb = QPushButton("🚀  启动工具")
+    lb = QPushButton(LANGUAGES[CURRENT_LANG]["launch_button"])
     lb.setEnabled(False)
     lb.setStyleSheet(
         "QPushButton{background:#0984e3;color:white;font-size:15px;font-weight:bold;"
@@ -397,8 +457,8 @@ if __name__ == "__main__":
     def on_sel(cur, prev):
         if cur is None:
             di.setText("🔧")
-            dn.setText("选择一个工具")
-            dd.setText("请从左侧列表选择一个工具，查看详情并启动")
+            dn.setText(LANGUAGES[CURRENT_LANG]["select_tool"])
+            dd.setText(LANGUAGES[CURRENT_LANG]["select_tool_prompt"])
             lb.setEnabled(False)
             return
         row = cur.data(Qt.UserRole)
@@ -406,8 +466,11 @@ if __name__ == "__main__":
             return
         t = tools[row]
         di.setText(t["icon"])
-        dn.setText(t["name"])
-        dd.setText(t.get("description", ""))
+        # 根据当前语言选择显示的名称和描述
+        display_name = t.get("name_en", t["name"]) if CURRENT_LANG == "en" else t["name"]
+        display_desc = t.get("description_en", t.get("description", "")) if CURRENT_LANG == "en" else t.get("description", "")
+        dn.setText(display_name)
+        dd.setText(display_desc)
         lb.setEnabled(True)
 
     def do_launch():
@@ -436,8 +499,8 @@ if __name__ == "__main__":
             )
             return
         try:
-            tw = cls()
-            tw.setWindowTitle(f'{t["icon"]} {t["name"]}')
+            # 将当前语言设置传递给子工具
+            tw = cls(lang=CURRENT_LANG)
             tw.show()
             tool_windows.append(tw)
             logger.info(f"工具启动成功: {t['name']}")
@@ -485,6 +548,34 @@ if __name__ == "__main__":
     tl.currentItemChanged.connect(on_sel)
     tl.itemDoubleClicked.connect(do_launch)
     lb.clicked.connect(do_launch)
+
+    def update_ui_text():
+        w.setWindowTitle(LANGUAGES[CURRENT_LANG]["window_title"])
+        tt.setText(LANGUAGES[CURRENT_LANG]["app_title"])
+        # 更新左侧列表的工具名称
+        _rebuild_item_widgets(tl, tools)
+        # 更新右侧详情区
+        current_item = tl.currentItem()
+        if current_item is None:
+            dn.setText(LANGUAGES[CURRENT_LANG]["select_tool"])
+            dd.setText(LANGUAGES[CURRENT_LANG]["select_tool_prompt"])
+        else:
+            row = current_item.data(Qt.UserRole)
+            if row is not None and 0 <= row < len(tools):
+                t = tools[row]
+                display_name = t.get("name_en", t["name"]) if CURRENT_LANG == "en" else t["name"]
+                display_desc = t.get("description_en", t.get("description", "")) if CURRENT_LANG == "en" else t.get("description", "")
+                dn.setText(display_name)
+                dd.setText(display_desc)
+        lb.setText(LANGUAGES[CURRENT_LANG]["launch_button"])
+        lang_btn.setText(LANGUAGES[CURRENT_LANG]["lang_switch"])
+
+    def switch_language():
+        global CURRENT_LANG
+        CURRENT_LANG = "en" if CURRENT_LANG == "zh" else "zh"
+        update_ui_text()
+
+    lang_btn.clicked.connect(switch_language)
 
     w.show()
     sys.exit(app.exec())

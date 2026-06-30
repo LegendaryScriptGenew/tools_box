@@ -753,8 +753,9 @@ class ClientDeployPool(QObject):
 #  主窗口
 # ============================================================
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, lang="zh"):
         super().__init__()
+        self.lang = lang
         self.detector = SystemDetector()
         self.ssh_manager = SSHManager()
         self.distro_info = self.detector.detect_distro()
@@ -774,11 +775,16 @@ class MainWindow(QMainWindow):
         self._refresh_server_info()
         self._refresh_yum_status()
 
+    def _tr(self, zh: str, en: str) -> str:
+        """根据当前语言返回对应文本"""
+        return en if self.lang == "en" else zh
+
     # ----------------------------------------------------------
     #  UI 构建 — 纯 Fusion 风格，无全局 stylesheet
     # ----------------------------------------------------------
     def _init_ui(self):
-        self.setWindowTitle("Linux YUM 源管理器")
+        title = "Linux YUM Repository Manager" if self.lang == "en" else "Linux YUM 源管理器"
+        self.setWindowTitle(title)
         self.setMinimumSize(1000, 720)
         self.resize(1200, 850)
         self.setStyleSheet("QMainWindow { background: #f5f6fa; }")
@@ -802,8 +808,8 @@ class MainWindow(QMainWindow):
 
         self.nav_group = QButtonGroup(self)
         self.nav_group.setExclusive(True)
-        n1 = self._tab_btn("📦  服务器配置", 0)
-        n2 = self._tab_btn("📋  客户端配置", 1)
+        n1 = self._tab_btn(self._tr("📦  服务器配置", "📦  Server Config"), 0)
+        n2 = self._tab_btn(self._tr("📋  客户端配置", "📋  Client Config"), 1)
         nav_row.addWidget(n1)
         nav_row.addWidget(n2)
         nav_row.addStretch()
@@ -852,10 +858,10 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(16, 8, 16, 8)
         layout.setSpacing(8)
 
-        layout.addWidget(QLabel("🔗"))
-
+        layout.addWidget(QLabel(self._tr("🔗", "🔗")))
+        
         # 主机
-        layout.addWidget(QLabel("主机:"))
+        layout.addWidget(QLabel(self._tr("主机:", "Host:")))
         self.ssh_host = QLineEdit()
         self.ssh_host.setPlaceholderText("192.168.1.100")
         self.ssh_host.setFixedHeight(34)
@@ -868,7 +874,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.ssh_host)
 
         # 端口
-        layout.addWidget(QLabel("端口:"))
+        layout.addWidget(QLabel(self._tr("端口:", "Port:")))
         self.ssh_port = QLineEdit("22")
         self.ssh_port.setFixedWidth(70)
         self.ssh_port.setFixedHeight(34)
@@ -894,7 +900,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.ssh_pass)
 
         # 连接按钮
-        self.btn_ssh_toggle = QPushButton("连接")
+        self.btn_ssh_toggle = QPushButton("Connect" if self.lang == "en" else "连接")
         self.btn_ssh_toggle.setFixedHeight(34)
         self.btn_ssh_toggle.setStyleSheet("""
             QPushButton {
@@ -908,7 +914,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.btn_ssh_toggle)
 
         # 刷新 ISO 按钮
-        self.btn_ssh_refresh = QPushButton("刷新")
+        self.btn_ssh_refresh = QPushButton("Refresh" if self.lang == "en" else "刷新")
         self.btn_ssh_refresh.setFixedHeight(34)
         self.btn_ssh_refresh.setStyleSheet("""
             QPushButton {
@@ -923,7 +929,7 @@ class MainWindow(QMainWindow):
 
         layout.addStretch()
 
-        self.ssh_status_label = QLabel("● 未连接")
+        self.ssh_status_label = QLabel(self._tr("● 未连接", "● Disconnected"))
         self.ssh_status_label.setStyleSheet("color: #e74c3c; font-weight: bold; font-size: 13px;")
         layout.addWidget(self.ssh_status_label)
 
@@ -974,9 +980,9 @@ class MainWindow(QMainWindow):
     def _on_ssh_connected(self):
         self._set_ssh_ui_busy(False)
         host_str = f"{self.ssh_manager.user}@{self.ssh_manager.host}"
-        self.ssh_status_label.setText(f"● 已连接 {host_str}")
+        self.ssh_status_label.setText(self._tr(f"● 已连接 {host_str}", f"● Connected {host_str}"))
         self.ssh_status_label.setStyleSheet("color: #27ae60; font-weight: bold; font-size: 13px;")
-        self.btn_ssh_toggle.setText("断开")
+        self.btn_ssh_toggle.setText(self._tr("断开", "Disconnect"))
         self.btn_ssh_toggle.setStyleSheet("""
             QPushButton {
                 background: #d63031; color: white; border: none;
@@ -1007,9 +1013,9 @@ class MainWindow(QMainWindow):
         self.web_iso_list.setEnabled(False)
         self.btn_add_exec.setEnabled(False)
         self.add_iso_list.setEnabled(False)
-        self.ssh_status_label.setText("● 未连接")
+        self.ssh_status_label.setText(self._tr("● 未连接", "● Disconnected"))
         self.ssh_status_label.setStyleSheet("color: #e74c3c; font-weight: bold; font-size: 13px;")
-        self.btn_ssh_toggle.setText("连接")
+        self.btn_ssh_toggle.setText(self._tr("连接", "Connect"))
         self.btn_ssh_toggle.setStyleSheet("""
             QPushButton {
                 background: #0984e3; color: white; border: none;
@@ -1105,7 +1111,7 @@ class MainWindow(QMainWindow):
         title_frame.setFixedHeight(40)
         tl = QHBoxLayout(title_frame)
         tl.setContentsMargins(0, 0, 0, 0)
-        title_lbl = QLabel("操作选择")
+        title_lbl = QLabel(self._tr("操作选择", "Operation"))
         title_lbl.setAlignment(Qt.AlignCenter)
         title_lbl.setStyleSheet("font-size: 13px; color: #2d3436;")
         tl.addWidget(title_lbl)
@@ -1143,9 +1149,9 @@ class MainWindow(QMainWindow):
             bfl.addWidget(btn)
             return btn
 
-        self.btn_srv_local = _srv_btn("创建本地yum源", "📦", 0)
-        self.btn_srv_web = _srv_btn("创建webyum源", "🌐", 1)
-        self.btn_srv_web_add = _srv_btn("新增webyum源", "➕", 2)
+        self.btn_srv_local = _srv_btn(self._tr("创建本地yum源", "Create Local yum Source"), "📦", 0)
+        self.btn_srv_web = _srv_btn(self._tr("创建webyum源", "Create Web yum Source"), "🌐", 1)
+        self.btn_srv_web_add = _srv_btn(self._tr("新增webyum源", "Add Web yum Source"), "➕", 2)
         bfl.addStretch()
         ll.addWidget(btn_frame, 1)
 
@@ -1230,7 +1236,7 @@ class MainWindow(QMainWindow):
 
         desc_row = QHBoxLayout()
         desc_row.setSpacing(6)
-        desc_row.addWidget(QLabel("镜像解压后存放路径",
+        desc_row.addWidget(QLabel(self._tr("镜像解压后存放路径", "ISO Extract Path"),
             styleSheet="font-size: 12px; color: #636e72;"))
         desc_row.addStretch()
         self.lbl_mount_space = QLabel()
@@ -1258,8 +1264,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._check_mount_path)
 
         # 镜像位置
-        layout.addSpacing(6)
-        layout.addWidget(QLabel("镜像位置（ISO 文件所在目录）",
+        layout.addWidget(QLabel(self._tr("镜像位置（ISO 文件所在目录）", "ISO File Directory"),
             styleSheet="font-size: 12px; color: #636e72;"))
         ip_row = QHBoxLayout()
         ip_row.setSpacing(6)
@@ -1268,7 +1273,7 @@ class MainWindow(QMainWindow):
         self.local_iso_dir.setFixedWidth(_INPUT_W)
         self.local_iso_dir.setStyleSheet(_INPUT_STYLE)
         ip_row.addWidget(self.local_iso_dir)
-        self.btn_local_refresh = QPushButton("刷新")
+        self.btn_local_refresh = QPushButton(self._tr("刷新", "Refresh"))
         self.btn_local_refresh.setFixedHeight(34)
         self.btn_local_refresh.setStyleSheet("""
             QPushButton { background: white; color: #6b7a7f; border: 1px solid #c8d0d8;
@@ -1282,7 +1287,10 @@ class MainWindow(QMainWindow):
 
         # ISO 列表
         self.local_iso_list = QTreeWidget()
-        self.local_iso_list.setHeaderLabels(["", "文件名", "大小", "匹配状态"])
+        self.local_iso_list.setHeaderLabels(["", 
+            self._tr("文件名", "File Name"),
+            self._tr("大小", "Size"),
+            self._tr("匹配状态", "Match Status")])
         self.local_iso_list.setColumnWidth(0, 36)
         self.local_iso_list.setColumnWidth(1, 300)
         self.local_iso_list.setColumnWidth(2, 70)
@@ -1319,7 +1327,7 @@ class MainWindow(QMainWindow):
 
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self.btn_local_exec = QPushButton("▶  创建本地 yum 源")
+        self.btn_local_exec = QPushButton(self._tr("▶  创建本地 yum 源", "▶  Create Local yum Source"))
         self.btn_local_exec.setStyleSheet("""
             QPushButton { background: #0984e3; color: white; border: none;
                           border-radius: 4px; padding: 8px 28px; font-size: 13px; font-weight: bold; }
@@ -1328,7 +1336,7 @@ class MainWindow(QMainWindow):
         """)
         btn_row.addWidget(self.btn_local_exec)
         btn_row.addSpacing(8)
-        self.btn_local_cancel = QPushButton("取消")
+        self.btn_local_cancel = QPushButton(self._tr("取消", "Cancel"))
         self.btn_local_cancel.setStyleSheet("""
             QPushButton { background: white; color: #6b7a7f; border: 1px solid #c8d0d8;
                           border-radius: 4px; padding: 8px 28px; font-size: 13px; }
@@ -1390,13 +1398,13 @@ class MainWindow(QMainWindow):
 
         # 标题行
         title_row = QHBoxLayout()
-        title_row.addWidget(QLabel("🔍 环境预检查",
+        title_row.addWidget(QLabel(self._tr("🔍 环境预检查", "🔍 Env Check"),
             styleSheet="font-size: 13px; font-weight: bold; color: #2d3436;"))
         title_row.addStretch()
 
         # web 表单才有关闭按钮
         if not suffix:
-            self.btn_env_disable_all = QPushButton("一键关闭防火墙和SELinux")
+            self.btn_env_disable_all = QPushButton(self._tr("一键关闭防火墙和SELinux", "Disable Firewall & SELinux"))
             self.btn_env_disable_all.setFixedHeight(30)
             self.btn_env_disable_all.setStyleSheet("""
                 QPushButton { background: #d63031; color: white; border: none;
@@ -1407,7 +1415,7 @@ class MainWindow(QMainWindow):
             self.btn_env_disable_all.clicked.connect(self._disable_all)
             title_row.addWidget(self.btn_env_disable_all)
 
-        btn_refresh = QPushButton("🔄 刷新检查")
+        btn_refresh = QPushButton(self._tr("🔄 刷新检查", "🔄 Refresh Check"))
         btn_refresh.setFixedHeight(30)
         btn_refresh.setStyleSheet("""
             QPushButton { background: #0984e3; color: white; border: none;
@@ -1418,14 +1426,14 @@ class MainWindow(QMainWindow):
         title_row.addWidget(btn_refresh)
         cl.addLayout(title_row)
 
-        port_lbl = QLabel("⏳ 端口 80: 检测中...")
-        httpd_lbl = QLabel("⏳ httpd: 检测中...")
+        port_lbl = QLabel(self._tr("⏳ 端口 80: 检测中...", "⏳ Port 80: Checking..."))
+        httpd_lbl = QLabel(self._tr("⏳ httpd: 检测中...", "⏳ httpd: Checking..."))
         SS = "font-size: 12px; color: #636e72; padding: 3px 0;"
 
         # web 表单（双列布局，无行内关闭按钮）
         if not suffix:
-            fw_lbl = QLabel("⏳ 防火墙: 检测中...")
-            se_lbl = QLabel("⏳ SELinux: 检测中...")
+            fw_lbl = QLabel(self._tr("⏳ 防火墙: 检测中...", "⏳ Firewall: Checking..."))
+            se_lbl = QLabel(self._tr("⏳ SELinux: 检测中...", "⏳ SELinux: Checking..."))
 
             cols = QHBoxLayout()
             cols.setSpacing(30)
@@ -1449,8 +1457,8 @@ class MainWindow(QMainWindow):
 
         # add 表单（双列布局，无关闭按钮）
         else:
-            fw_lbl = QLabel("⏳ 防火墙: 检测中...")
-            se_lbl = QLabel("⏳ SELinux: 检测中...")
+            fw_lbl = QLabel(self._tr("⏳ 防火墙: 检测中...", "⏳ Firewall: Checking..."))
+            se_lbl = QLabel(self._tr("⏳ SELinux: 检测中...", "⏳ SELinux: Checking..."))
 
             cols = QHBoxLayout()
             cols.setSpacing(30)
@@ -1493,9 +1501,10 @@ class MainWindow(QMainWindow):
             SS = "font-size: 12px; padding: 3px 0;"
 
             if not self.ssh_manager.connected:
-                port_lbl.setText("❌ SSH 未连接"); httpd_lbl.setText("❌ SSH 未连接")
-                if fw_lbl: fw_lbl.setText("❌ SSH 未连接")
-                if se_lbl: se_lbl.setText("❌ SSH 未连接")
+                msg = self._tr("❌ SSH 未连接", "❌ SSH Disconnected")
+                port_lbl.setText(msg); httpd_lbl.setText(msg)
+                if fw_lbl: fw_lbl.setText(msg)
+                if se_lbl: se_lbl.setText(msg)
                 continue
 
             # 端口 80
@@ -1505,10 +1514,10 @@ class MainWindow(QMainWindow):
             )
             occupied = 'occupied' in out
             if is_add:
-                port_lbl.setText("  ✅ 端口 80: 运行中" if occupied else "  ❌ 端口 80: 未启用")
+                port_lbl.setText(self._tr("  ✅ 端口 80: 运行中", "  ✅ Port 80: Running") if occupied else self._tr("  ❌ 端口 80: 未启用", "  ❌ Port 80: Not Enabled"))
                 port_lbl.setStyleSheet(SS + ("color: #27ae60;" if occupied else "color: #d63031;"))
             else:
-                port_lbl.setText("  ✅ 端口 80: 未占用" if not occupied else "  ❌ 端口 80: 已被占用")
+                port_lbl.setText(self._tr("  ✅ 端口 80: 未占用", "  ✅ Port 80: Free") if not occupied else self._tr("  ❌ 端口 80: 已被占用", "  ❌ Port 80: Occupied"))
                 port_lbl.setStyleSheet(SS + ("color: #27ae60;" if not occupied else "color: #d63031;"))
                 self._env_port_ok = not occupied
 
@@ -1538,22 +1547,14 @@ class MainWindow(QMainWindow):
 
             # 防火墙状态
             if fw_lbl:
-                ok, out = self.ssh_manager.exec_command("systemctl is-active firewalld 2>/dev/null")
-                active = ok and 'active' in out
-                fw_good = not active if is_add else True
-                fw_lbl.setText(
-                    f"  {'✅' if fw_good else '🔴'} 防火墙: {'运行中' if active else '已关闭'}"
-                )
+                fw_text = self._tr("  防火墙: 运行中", "  🔴 Firewall: Active") if active else self._tr("  ✅ 防火墙: 已关闭", "  ✅ Firewall: Disabled")
+                fw_lbl.setText(fw_text)
                 fw_lbl.setStyleSheet(SS + ("color: #27ae60;" if fw_good else "color: #d63031;"))
 
             # SELinux 状态
             if se_lbl:
-                ok, out = self.ssh_manager.exec_command("getenforce 2>/dev/null")
-                enforcing = ok and 'Enforcing' in out
-                se_good = not enforcing if is_add else True
-                se_lbl.setText(
-                    f"  {'✅' if se_good else '🔴'} SELinux: {'开启' if enforcing else '已关闭'}"
-                )
+                se_text = self._tr("  🔴 SELinux: 开启", "  🔴 SELinux: Enforcing") if enforcing else self._tr("  ✅ SELinux: 已关闭", "  ✅ SELinux: Disabled")
+                se_lbl.setText(se_text)
                 se_lbl.setStyleSheet(SS + ("color: #27ae60;" if se_good else "color: #d63031;"))
 
             # 创建模式：防火墙和 SELinux 均已关闭 → 禁用一键关闭按钮
@@ -1638,7 +1639,7 @@ class MainWindow(QMainWindow):
 
         left = QHBoxLayout()
         left.setSpacing(6)
-        left.addWidget(QLabel("HTTP 地址:",
+        left.addWidget(QLabel(self._tr("HTTP 地址:", "HTTP Address:"),
             styleSheet="font-size: 12px; color: #636e72;"))
         self.cb_ip = QComboBox()
         self.cb_ip.setEditable(True)
@@ -1653,13 +1654,13 @@ class MainWindow(QMainWindow):
 
         right = QHBoxLayout()
         right.setSpacing(6)
-        right.addWidget(QLabel("镜像位置:",
+        right.addWidget(QLabel(self._tr("镜像位置:", "ISO Directory:"),
             styleSheet="font-size: 12px; color: #636e72;"))
         self.web_iso_dir = QLineEdit(self._current_iso_dir)
         self.web_iso_dir.setFixedHeight(_INPUT_H)
         self.web_iso_dir.setStyleSheet(_INPUT_STYLE)
         right.addWidget(self.web_iso_dir, 1)
-        self.btn_web_refresh = QPushButton("刷新")
+        self.btn_web_refresh = QPushButton(self._tr("刷新", "Refresh"))
         self.btn_web_refresh.setFixedHeight(34)
         self.btn_web_refresh.setStyleSheet("""
             QPushButton { background: white; color: #6b7a7f; border: 1px solid #c8d0d8;
@@ -1673,7 +1674,9 @@ class MainWindow(QMainWindow):
 
         # ISO 列表（多选，无版本匹配）
         self.web_iso_list = QTreeWidget()
-        self.web_iso_list.setHeaderLabels(["", "文件名", "大小"])
+        self.web_iso_list.setHeaderLabels(["", 
+            self._tr("文件名", "File Name"),
+            self._tr("大小", "Size")])
         self.web_iso_list.setColumnWidth(0, 36)
         self.web_iso_list.setColumnWidth(1, 300)
         self.web_iso_list.setColumnWidth(2, 70)
@@ -1713,7 +1716,7 @@ class MainWindow(QMainWindow):
         # 按钮
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self.btn_web_exec = QPushButton("▶  开始部署")
+        self.btn_web_exec = QPushButton(self._tr("▶  开始部署", "▶  Start Deploy"))
         self.btn_web_exec.setStyleSheet("""
             QPushButton { background: #0984e3; color: white; border: none;
                           border-radius: 4px; padding: 8px 28px; font-size: 13px; font-weight: bold; }
@@ -1722,7 +1725,7 @@ class MainWindow(QMainWindow):
         """)
         btn_row.addWidget(self.btn_web_exec)
         btn_row.addSpacing(8)
-        self.btn_web_dl_local = QPushButton("⬇ 下载 .repo文件")
+        self.btn_web_dl_local = QPushButton(self._tr("⬇ 下载 .repo文件", "⬇ Download .repo"))
         self.btn_web_dl_local.setStyleSheet("""
             QPushButton { background: white; color: #6b7a7f; border: 1px solid #c8d0d8;
                           border-radius: 4px; padding: 8px 18px; font-size: 12px; }
@@ -1761,13 +1764,13 @@ class MainWindow(QMainWindow):
         self._refresh_ip_list()
         dir_row = QHBoxLayout()
         dir_row.setSpacing(6)
-        dir_row.addWidget(QLabel("镜像位置:",
+        dir_row.addWidget(QLabel(self._tr("镜像位置:", "ISO Directory:"),
             styleSheet="font-size: 12px; color: #636e72;"))
         self.add_iso_dir = QLineEdit(self._current_iso_dir)
         self.add_iso_dir.setFixedHeight(_INPUT_H)
         self.add_iso_dir.setStyleSheet(_INPUT_STYLE)
         dir_row.addWidget(self.add_iso_dir, 1)
-        self.btn_add_refresh = QPushButton("刷新")
+        self.btn_add_refresh = QPushButton(self._tr("刷新", "Refresh"))
         self.btn_add_refresh.setFixedHeight(34)
         self.btn_add_refresh.setStyleSheet("""
             QPushButton { background: white; color: #6b7a7f; border: 1px solid #c8d0d8;
@@ -1780,7 +1783,9 @@ class MainWindow(QMainWindow):
 
         # ISO 列表（多选，无版本匹配）
         self.add_iso_list = QTreeWidget()
-        self.add_iso_list.setHeaderLabels(["", "文件名", "大小"])
+        self.add_iso_list.setHeaderLabels(["", 
+            self._tr("文件名", "File Name"),
+            self._tr("大小", "Size")])
         self.add_iso_list.setColumnWidth(0, 36)
         self.add_iso_list.setColumnWidth(1, 300)
         self.add_iso_list.setColumnWidth(2, 70)
@@ -1820,7 +1825,7 @@ class MainWindow(QMainWindow):
         # 按钮
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self.btn_add_exec = QPushButton("▶  新增 Web yum 源")
+        self.btn_add_exec = QPushButton(self._tr("▶  新增 Web yum 源", "▶  Add Web yum Source"))
         self.btn_add_exec.setStyleSheet("""
             QPushButton { background: #0984e3; color: white; border: none;
                           border-radius: 4px; padding: 8px 28px; font-size: 13px; font-weight: bold; }
@@ -1829,7 +1834,7 @@ class MainWindow(QMainWindow):
         """)
         btn_row.addWidget(self.btn_add_exec)
         btn_row.addSpacing(8)
-        self.btn_add_dl_local = QPushButton("⬇ 下载 .repo")
+        self.btn_add_dl_local = QPushButton(self._tr("⬇ 下载 .repo", "⬇ Download .repo"))
         self.btn_add_dl_local.setStyleSheet("""
             QPushButton { background: white; color: #6b7a7f; border: 1px solid #c8d0d8;
                           border-radius: 4px; padding: 8px 18px; font-size: 12px; }
@@ -1967,15 +1972,15 @@ class MainWindow(QMainWindow):
         rl.setContentsMargins(14, 10, 14, 10)
         rl.setSpacing(8)
 
-        title = QLabel("📦 选择要分发的 .repo 文件")
+        title = QLabel(self._tr("📦 选择要分发的 .repo 文件", "📦 Select .repo File to Deploy"))
         title.setStyleSheet("font-size: 13px; font-weight: bold; color: #2d3436; background: transparent;")
         rl.addWidget(title)
 
         # 来源切换
         src_row = QHBoxLayout()
         src_row.setSpacing(20)
-        self.repo_source_server = QRadioButton("从服务器选择")
-        self.repo_source_upload = QRadioButton("本地上传")
+        self.repo_source_server = QRadioButton(self._tr("从服务器选择", "From Server"))
+        self.repo_source_upload = QRadioButton(self._tr("本地上传", "Local Upload"))
         self.repo_source_server.setChecked(True)
         for rb in (self.repo_source_server, self.repo_source_upload):
             rb.setStyleSheet("QRadioButton { font-size: 12px; color: #2d3436; }")
@@ -2012,7 +2017,7 @@ class MainWindow(QMainWindow):
         upload_col.setContentsMargins(0, 2, 0, 2)
         upload_col.setSpacing(2)
         # 按钮左对齐
-        self.repo_upload_btn = QPushButton("📁 选择 .repo 文件")
+        self.repo_upload_btn = QPushButton(self._tr("📁 选择 .repo 文件", "📁 Select .repo File"))
         self.repo_upload_btn.setStyleSheet("""
             QPushButton { background: white; color: #6b7a7f; border: 1px solid #c8d0d8;
                           border-radius: 4px; padding: 6px 14px; font-size: 12px; }
@@ -2020,7 +2025,7 @@ class MainWindow(QMainWindow):
         """)
         upload_col.addWidget(self.repo_upload_btn, alignment=Qt.AlignLeft)
         # 拖拽提示 + 文件信息
-        self.repo_upload_label = QLabel("支持拖拽 .repo 文件到此处")
+        self.repo_upload_label = QLabel(self._tr("支持拖拽 .repo 文件到此处", "Drag & drop .repo file here"))
         self.repo_upload_label.setStyleSheet("font-size: 12px; color: #b2bec3; background: transparent;")
         upload_col.addWidget(self.repo_upload_label, alignment=Qt.AlignLeft)
         upload_col.addStretch()
@@ -2028,7 +2033,8 @@ class MainWindow(QMainWindow):
 
         rl.addWidget(self.repo_content_stack)
 
-        repo_hint = QLabel("提示：服务器 repo 单选，本地上传重复上传以最后一次为准")
+        repo_hint = QLabel(self._tr("提示：服务器 repo 单选，本地上传重复上传以最后一次为准",
+                                   "Hint: Single selection for server repo; last upload wins for local"))
         repo_hint.setStyleSheet("font-size: 11px; color: #b2bec3; background: transparent;")
         rl.addWidget(repo_hint)
 
@@ -2038,11 +2044,11 @@ class MainWindow(QMainWindow):
         action_bar = QHBoxLayout()
         action_bar.setSpacing(8)
 
-        self.btn_client_import = QPushButton("📥 导入 Excel")
-        self.btn_client_add = QPushButton("+ 手动添加")
-        self.btn_client_delete = QPushButton("🗑 删除选中")
+        self.btn_client_import = QPushButton(self._tr("📥 导入 Excel", "📥 Import Excel"))
+        self.btn_client_add = QPushButton(self._tr("+ 手动添加", "+ Manual Add"))
+        self.btn_client_delete = QPushButton(self._tr("🗑 删除选中", "🗑 Delete Selected"))
         self.cb_client_system_filter = QComboBox()
-        self.cb_client_system_filter.addItem("按系统勾选 ▼", "")
+        self.cb_client_system_filter.addItem(self._tr("按系统勾选 ▼", "Filter by System ▼"), "")
         self.cb_client_system_filter.setMinimumWidth(160)
 
         for btn in (self.btn_client_import, self.btn_client_add, self.btn_client_delete):
@@ -2064,7 +2070,15 @@ class MainWindow(QMainWindow):
         self.client_table = QTreeWidget()
         self.client_table.setColumnCount(9)
         self.client_table.setHeaderLabels([
-            "", "IP 地址", "端口", "用户名", "系统类型", "版本", "yum 状态", "YUM 路径", "连接状态"
+            "", 
+            self._tr("IP 地址", "IP Address"),
+            self._tr("端口", "Port"),
+            self._tr("用户名", "Username"),
+            self._tr("系统类型", "OS Type"),
+            self._tr("版本", "Version"),
+            self._tr("yum 状态", "YUM Status"),
+            self._tr("YUM 路径", "YUM Path"),
+            self._tr("连接状态", "Connection")
         ])
         self.client_table.setRootIsDecorated(False)
         self.client_table.setSelectionMode(QAbstractItemView.NoSelection)
@@ -2096,14 +2110,14 @@ class MainWindow(QMainWindow):
         # ── 4. 底部按钮 ──
         bottom_row = QHBoxLayout()
         bottom_row.addStretch()
-        self.btn_client_detect = QPushButton("🔄 检测选中客户端")
+        self.btn_client_detect = QPushButton(self._tr("🔄 检测选中客户端", "🔄 Detect Selected"))
         self.btn_client_detect.setStyleSheet("""
             QPushButton { background: #0984e3; color: white; border: none;
                           border-radius: 4px; padding: 8px 24px; font-size: 13px; font-weight: bold; }
             QPushButton:hover { background: #0873c4; }
             QPushButton:disabled { background: #b2bec3; color: #dfe6e9; }
         """)
-        self.btn_client_deploy = QPushButton("🚀 部署到选中客户端")
+        self.btn_client_deploy = QPushButton(self._tr("🚀 部署到选中客户端", "🚀 Deploy to Selected"))
         self.btn_client_deploy.setStyleSheet("""
             QPushButton { background: #27ae60; color: white; border: none;
                           border-radius: 4px; padding: 8px 24px; font-size: 13px; font-weight: bold; }
@@ -2116,13 +2130,14 @@ class MainWindow(QMainWindow):
         bottom_row.addSpacing(12)
         bottom_row.addWidget(self.btn_client_deploy)
         bottom_row.addSpacing(12)
-        self.chk_client_deep_check = QCheckBox("深度检测（完整验证yum可用性，较慢）")
+        self.chk_client_deep_check = QCheckBox(self._tr("深度检测（完整验证yum可用性，较慢）",
+                                                              "Deep Check (full yum validation, slower)"))
         self.chk_client_deep_check.setStyleSheet("""
             QCheckBox { font-size: 11px; color: #636e72; }
         """)
         self.chk_client_deep_check.setToolTip(
-            "勾选后将执行 yum clean all + makecache + install --downloadonly 完整验证\n"
-            "不勾选则仅执行 yum repolist 快速检测（推荐）"
+            self._tr("勾选后将执行 yum clean all + makecache + install --downloadonly 完整验证\n不勾选则仅执行 yum repolist 快速检测（推荐）",
+                       "Deep check executes: yum clean all + makecache + install --downloadonly\nQuick check uses: yum repolist (recommended)")
         )
         bottom_row.addWidget(self.chk_client_deep_check)
         bottom_row.addStretch()

@@ -2,63 +2,81 @@
   "tools": [
     {
       "name": "批量配置NTP",
+      "name_en": "Batch NTP Configuration",
       "description": "使用条件：提前在系统中安装chrony包即可。\n使用说明：\n  1.批量配置Linux服务器时间同步。\n  2.支持配置、还原、获取NTP状态等信息。\n  3.支持常见系统，如Redhat、Kylin、Ubuntu等。",
+      "description_en": "Prerequisite: chrony package must be installed.\nUsage:\n  1. Batch configure NTP time synchronization for Linux servers.\n  2. Support configure, restore, get NTP status, etc.\n  3. Support common systems like Redhat, Kylin, Ubuntu, etc.",
       "module": "Linux_Chrony_NTP_sub",
       "class": "NTPConfigTool",
       "icon": "🕐"
     },
     {
       "name": "Linux工具集",
+      "name_en": "Linux Tools",
       "description": "Linux服务器管理工具集：用户管理（新增/删除）、SSH配置（端口/root登录）、登录测试、用户列表获取、安全基线检查",
+      "description_en": "Linux server management toolkit: User management (add/delete), SSH configuration (port/root login), login test, user list retrieval, security baseline check",
       "module": "Linux_Tools_sub",
       "class": "LinuxToolsGUI",
       "icon": "💻"
     },
     {
       "name": "密码生成器",
+      "name_en": "Password Generator",
       "description": "生成随机密码，支持单个生成、批量生成、Excel文件处理，自动保存日志",
+      "description_en": "Generate random passwords, support single generation, batch generation, Excel file processing, auto-save logs",
       "module": "Tool_Passwd_Creat_sub",
       "class": "PasswdTool",
       "icon": "🔑"
     },
     {
       "name": "PDF工具集",
+      "name_en": "PDF Tools",
       "description": "PDF处理工具：支持PDF合并、拆分、A4多页拼版，支持文件拖拽输入。",
+      "description_en": "PDF processing tools: Support PDF merge, split, A4 multi-page layout, support file drag-and-drop input.",
       "module": "PDF_Tool_sub",
       "class": "PDFToolBox",
       "icon": "📄"
     },
     {
       "name": "网段Ping扫描器",
+      "name_en": "Network Ping Scanner",
       "description": "批量Ping扫描IP网段，可视化网格显示通断状态，支持两轮重试机制",
+      "description_en": "Batch Ping scan IP network segments, visual grid display of connectivity status, support two-round retry mechanism",
       "module": "Ping_Scanner_sub",
       "class": "PingScanner",
       "icon": "🌐"
     },
     {
       "name": "IMS工具",
+      "name_en": "IMS Tool",
       "description": "IMS 综合工具：抓包(SBCM/tcpdump) + 网元升级 + 日志查看",
+      "description_en": "IMS comprehensive tool: Packet capture (SBCM/tcpdump) + NE upgrade + Log viewer",
       "module": "IMS_Tool_sub",
       "class": "IMSTool",
       "icon": "📦"
     },
     {
       "name": "Docker自动化",
+      "name_en": "Docker Automation",
       "description": "远程Docker管理，容器创建/删除/导入/导出，镜像管理，网络管理，批量操作",
+      "description_en": "Remote Docker management, container create/delete/import/export, image management, network management, batch operations",
       "module": "Linux_Docker_Tool_sub",
       "class": "DockerManager",
       "icon": "🐳"
     },
     {
       "name": "服务器初始化",
+      "name_en": "Server Initialization",
       "description": "服务器初始化",
+      "description_en": "Server initialization",
       "module": "Linux_Base_Config_sub",
       "class": "LinuxBaseConfig",
-      "icon": "🐳"
+      "icon": "🔧"
     },
     {
       "name": "YUM源管理器",
+      "name_en": "YUM Repository Manager",
       "description": "Linux YUM 源管理器：创建本地 yum 源（ISO挂载）、Web yum 源（httpd）、新增 Web yum 源。支持防火墙/SELinux 一键关闭、多 ISO 批量处理、客户端 .repo 文件分发与检测。",
+      "description_en": "Linux YUM repository manager: Create local yum repository (ISO mount), Web yum repository (httpd), add Web yum repository. Support firewall/SELinux one-click disable, multi-ISO batch processing, client .repo file distribution and detection.",
       "module": "Linux_yum_sub",
       "class": "MainWindow",
       "icon": "📦"

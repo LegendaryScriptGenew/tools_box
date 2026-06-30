@@ -1422,12 +1422,14 @@ class PdfDropLineEdit(QLineEdit):
 
 
 class PDFToolBox(QWidget):
-    def __init__(self):
+    def __init__(self, lang="zh"):
         super().__init__()
+        self.lang = lang
         self._thread = None
         self._worker = None
-
-        self.setWindowTitle("PDF 工具集")
+        
+        title = "PDF Tools" if self.lang == "en" else "PDF 工具集"
+        self.setWindowTitle(title)
         self.resize(1280, 860)
         self.setStyleSheet("""
             PDFToolBox { background:#f5f6fa; }
@@ -1588,7 +1590,7 @@ class PDFToolBox(QWidget):
         self.merge_output = QLineEdit()
         layout.addLayout(self._path_row("输出文件", self.merge_output, self._choose_merge_output))
 
-        run = QPushButton("开始合并")
+        run = QPushButton("Start Merge" if self.lang == "en" else self._tr("开始合并", "Start Merge"))
         run.setStyleSheet(self._btn_style("#0984e3"))
         layout.addWidget(run, alignment=Qt.AlignRight)
 
@@ -1634,7 +1636,7 @@ class PDFToolBox(QWidget):
         layout.addLayout(opt)
         layout.addStretch(1)
 
-        run = QPushButton("开始拆分")
+        run = QPushButton("Start Split" if self.lang == "en" else self._tr("开始拆分", "Start Split"))
         run.setStyleSheet(self._btn_style("#27ae60"))
         layout.addWidget(run, alignment=Qt.AlignRight)
 
@@ -1684,7 +1686,7 @@ class PDFToolBox(QWidget):
         layout.addWidget(self.nup_preview)
         layout.addStretch(1)
 
-        run = QPushButton("开始拼版")
+        run = QPushButton("Start Layout" if self.lang == "en" else self._tr("开始拼版", "Start Imposition"))
         run.setStyleSheet(self._btn_style("#0984e3"))
         layout.addWidget(run, alignment=Qt.AlignRight)
 

@@ -351,9 +351,8 @@ class SSHWorker(QThread):
 class NTPConfigTool(QMainWindow):
     """NTP配置工具主窗口"""
     
-    def __init__(self, lang="zh"):
+    def __init__(self):
         super().__init__()
-        self.lang = lang
         self.servers = []
         self.ssh_worker = None
         self._init_logging()
@@ -369,15 +368,8 @@ class NTPConfigTool(QMainWindow):
         logger.addHandler(fh)
         logger.setLevel(logging.INFO)
         
-
-    def _tr(self, zh, en):
-        """根据 self.lang 返回对应文本"""
-        return en if self.lang == 'en' else zh
-
-
     def init_ui(self):
-        title = "Batch NTP Configuration" if self.lang == "en" else "NTP配置工具"
-        self.setWindowTitle(title)
+        self.setWindowTitle("NTP配置工具")
         self.setGeometry(200, 130, 1450, 700)
 
         central = QWidget()
@@ -402,12 +394,12 @@ class NTPConfigTool(QMainWindow):
 
         # 文件
         l1 = QHBoxLayout()
-        l1.addWidget(QLabel(self._tr("配置文件", "Config File")))
+        l1.addWidget(QLabel("配置文件"))
         self.file_path_edit = QLineEdit()
         self.file_path_edit.setPlaceholderText("选择包含SSH登录信息的配置文件")
         self.file_path_edit.setReadOnly(True)
         l1.addWidget(self.file_path_edit)
-        self.select_file_btn = QPushButton("Select File" if self.lang == "en" else "选择文件")
+        self.select_file_btn = QPushButton("选择文件")
         self.select_file_btn.setStyleSheet("QPushButton{background:#0984e3;color:white;padding:7px 20px;border:none;border-radius:4px;font-size:13px;}QPushButton:hover{background:#0873c4;}")
         self.select_file_btn.clicked.connect(self.select_file)
         l1.addWidget(self.select_file_btn)
@@ -417,21 +409,21 @@ class NTPConfigTool(QMainWindow):
 
         # NTP配置
         l2 = QHBoxLayout()
-        l2.addWidget(QLabel(self._tr("NTP服务器", "NTP Server")))
+        l2.addWidget(QLabel("NTP服务器"))
         self.ntp_server_edit = QLineEdit()
         self.ntp_server_edit.setPlaceholderText("ntp.aliyun.com")
         self.ntp_server_edit.setText("ntp.aliyun.com")
         l2.addWidget(self.ntp_server_edit)
         l2.addSpacing(20)
-        l2.addWidget(QLabel(self._tr("MinPoll", "MinPoll")))
+        l2.addWidget(QLabel("MinPoll"))
         self.minpoll_spin = QSpinBox()
         self.minpoll_spin.setRange(3, 17); self.minpoll_spin.setValue(3)
         l2.addWidget(self.minpoll_spin)
-        l2.addWidget(QLabel(self._tr("MaxPoll", "MaxPoll")))
+        l2.addWidget(QLabel("MaxPoll"))
         self.maxpoll_spin = QSpinBox()
         self.maxpoll_spin.setRange(3, 17); self.maxpoll_spin.setValue(6)
         l2.addWidget(self.maxpoll_spin)
-        l2.addWidget(QLabel(self._tr("Step", "Step")))
+        l2.addWidget(QLabel("Step"))
         self.step_spin = QSpinBox()
         self.step_spin.setRange(-1, 1); self.step_spin.setValue(-1)
         l2.addWidget(self.step_spin)
@@ -455,16 +447,16 @@ class NTPConfigTool(QMainWindow):
 
         # 按钮
         btn_row = QHBoxLayout()
-        self.configure_btn = QPushButton("Configure NTP" if self.lang == "en" else "执行配置"); self.configure_btn.clicked.connect(self.configure_ntp)
+        self.configure_btn = QPushButton("执行配置"); self.configure_btn.clicked.connect(self.configure_ntp)
         self.configure_btn.setStyleSheet("QPushButton{background:#27ae60;color:white;font-weight:bold;padding:8px 24px;border:none;border-radius:4px;font-size:13px;}QPushButton:hover{background:#219a52;}QPushButton:disabled{background:#b2bec3;}")
         btn_row.addWidget(self.configure_btn)
-        self.restore_btn = QPushButton("Restore Config" if self.lang == "en" else "还原配置"); self.restore_btn.clicked.connect(self.restore_ntp)
+        self.restore_btn = QPushButton("还原配置"); self.restore_btn.clicked.connect(self.restore_ntp)
         self.restore_btn.setStyleSheet("QPushButton{background:#e67e22;color:white;font-weight:bold;padding:8px 24px;border:none;border-radius:4px;font-size:13px;}QPushButton:hover{background:#d35400;}QPushButton:disabled{background:#b2bec3;}")
         btn_row.addWidget(self.restore_btn)
-        self.status_btn = QPushButton("Check Status" if self.lang == "en" else "获取状态"); self.status_btn.clicked.connect(self.get_status)
+        self.status_btn = QPushButton("获取状态"); self.status_btn.clicked.connect(self.get_status)
         self.status_btn.setStyleSheet("QPushButton{background:#0984e3;color:white;font-weight:bold;padding:8px 24px;border:none;border-radius:4px;font-size:13px;}QPushButton:hover{background:#0873c4;}QPushButton:disabled{background:#b2bec3;}")
         btn_row.addWidget(self.status_btn)
-        self.clear_btn = QPushButton("Clear Log" if self.lang == "en" else "清空日志"); self.clear_btn.clicked.connect(self.clear_log)
+        self.clear_btn = QPushButton("清空日志"); self.clear_btn.clicked.connect(self.clear_log)
         self.clear_btn.setStyleSheet("QPushButton{background:#e74c3c;color:white;font-weight:bold;padding:8px 24px;border:none;border-radius:4px;font-size:13px;}QPushButton:hover{background:#c0392b;}QPushButton:disabled{background:#b2bec3;}")
         btn_row.addWidget(self.clear_btn)
         btn_row.addStretch()
