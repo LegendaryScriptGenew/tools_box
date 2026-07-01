@@ -15,7 +15,6 @@ import zipfile
 import datetime
 import subprocess
 import tempfile
-import json
 from pathlib import Path
 from typing import List, Tuple, Optional
 
@@ -41,7 +40,7 @@ from PySide6.QtWidgets import (
     QSizePolicy, QStatusBar, QTreeWidget, QTreeWidgetItem,
     QAbstractItemView, QHeaderView, QLineEdit, QGridLayout,
     QButtonGroup, QDialog, QRadioButton, QScrollArea, QStyle, QStyleOptionButton,
-    QStyleOptionHeader, QTabWidget, QSpinBox, QTableWidget,
+    QStyleOptionHeader, QTabWidget, QSpinBox, QTableWidget, QTableWidgetItem,
 )
 from PySide6.QtCore import Qt, QThread, QObject, Signal, QMutex, QMutexLocker, QTimer
 from PySide6.QtGui import QFont, QColor
@@ -1017,6 +1016,7 @@ class MainWindow(QMainWindow):
         self._client_passwords: dict[str, str] = {}  # ip -> password
         self._selected_repo_content: str = ""
         self._selected_repo_name: str = ""
+        self._init_yum_check_worker = None  # 系统初始化页面YUM检测线程
 
         self._init_ui()
         self._connect_signals()
@@ -4093,6 +4093,23 @@ class MainWindow(QMainWindow):
         self.init_delete_btn.clicked.connect(self._init_delete_selected)
         tool_row.addWidget(self.init_delete_btn)
         
+        # YUM状态检测按钮
+        self.init_yum_check_btn = QPushButton(self._tr("🔍 检测YUM状态", "🔍 Check YUM Status"))
+        self.init_yum_check_btn.setStyleSheet("""
+            QPushButton {
+                background: #00b894;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 12px;
+            }
+            QPushButton:hover { background: #00a884; }
+            QPushButton:disabled { background: #b2bec3; }
+        """)
+        self.init_yum_check_btn.clicked.connect(self._init_check_yum_status)
+        tool_row.addWidget(self.init_yum_check_btn)
+        
         layout.addLayout(tool_row)
         
         # 中间区域：左侧配置 + 右侧表格
@@ -4257,27 +4274,71 @@ class MainWindow(QMainWindow):
     }
     
     def _init_import_servers(self):
-        """导入服务器列表（JSON格式）"""
+        """从Excel文件导入服务器列表"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            self._tr("导入服务器列表", "Import Server List"),
+            self._tr("导入服务器列表 (Excel)", "Import Server List (Excel)"),
             "",
-            self._tr("JSON 文件 (*.json)", "JSON Files (*.json)")
+            self._tr("Excel 文件 (*.xlsx *.xls);;所有文件 (*.*)", "Excel Files (*.xlsx *.xls);;All Files (*.*)")
         )
         
         if not file_path:
             return
             
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                servers = json.load(f)
+            # 检查文件扩展名
+            if not file_path.endswith(('.xlsx', '.xls')):
+                raise ValueError(self._tr(
+                    "不支持的文件格式，请选择 .xlsx 或 .xls 文件",
+                    "Unsupported file format. Please select .xlsx or .xls file"
+                ))
             
-            # 验证数据格式
-            if not isinstance(servers, list):
-                raise ValueError("JSON 文件必须包含一个数组")
-                
+            # 读取Excel文件
+            try:
+                import pandas as pd
+            except ImportError:
+                self._log(self._tr(
+                    "❌ 缺少依赖库: pandas，请运行: pip install pandas openpyxl",
+                    "❌ Missing dependency: pandas. Please run: pip install pandas openpyxl"
+                ))
+                return
+            
+            df = pd.read_excel(file_path)
+            
+            # 检查必需的列 - 支持两种格式
+            if all(col in df.columns for col in ['host', 'port', 'username', 'password']):
+                # 新格式: host, port, username, password
+                df = df.dropna(subset=['host', 'username', 'password'])
+                servers = []
+                for _, row in df.iterrows():
+                    server = {
+                        'host': str(row['host']).strip(),
+                        'port': int(row['port']) if pd.notna(row['port']) else 22,
+                        'username': str(row['username']).strip(),
+                        'password': str(row['password']).strip()
+                    }
+                    servers.append(server)
+            elif all(col in df.columns for col in ['IP', '用户名', '密码']):
+                # 旧格式: IP, 用户名, 密码
+                df = df.dropna(subset=['IP', '用户名', '密码'])
+                servers = []
+                for _, row in df.iterrows():
+                    server = {
+                        'host': str(row['IP']).strip(),
+                        'port': 22,  # 默认SSH端口
+                        'username': str(row['用户名']).strip(),
+                        'password': str(row['密码']).strip()
+                    }
+                    servers.append(server)
+            else:
+                raise ValueError(self._tr(
+                    "Excel文件格式错误！\n\n支持的格式：\n1. 新格式: host, port, username, password\n2. 旧格式: IP, 用户名, 密码",
+                    "Invalid Excel format!\n\nSupported formats:\n1. New: host, port, username, password\n2. Old: IP, 用户名, 密码"
+                ))
+            
             self.init_servers = servers
             self._init_update_table()
+            self._init_check_yum_status()  # 导入后自动检测YUM状态
             
             self.init_path_label.setText(file_path)
             self._log(self._tr(
@@ -4331,6 +4392,7 @@ class MainWindow(QMainWindow):
             }
             self.init_servers.append(server)
             self._init_update_table()
+            self._init_check_yum_status()  # 添加后自动检测YUM状态
             self._log(self._tr(
                 f"✅ 已添加服务器: {server['host']}",
                 f"✅ Added server: {server['host']}"
@@ -4406,7 +4468,105 @@ class MainWindow(QMainWindow):
             f"📊 服务器列表已更新: {len(self.init_servers)} 个服务器",
             f"📊 Server list updated: {len(self.init_servers)} servers"
         ))
-    
+
+    def _init_yum_check_handler(self, client, server, log_fn):
+        """YUM状态检测handler：在远程服务器上执行yum repolist"""
+        host = server.get('host', '')
+        try:
+            cmd = "yum repolist 2>&1"
+            out, err = ssh_utils.ssh_exec(client, cmd)
+            if err:
+                return {'status': 'error', 'host': host, 'error': err[:100]}
+            # 检查输出中是否有可用的仓库
+            if out and ('repo' in out.lower() or '仓库' in out or 'repolist' in out.lower()):
+                # 提取仓库数量（尝试从输出中解析）
+                lines = [l.strip() for l in out.splitlines() if l.strip() and not l.startswith('#')]
+                repo_count = 0
+                for line in lines[1:]:  # 跳过标题行
+                    if line[0].isdigit() or line.startswith('repo'):
+                        repo_count += 1
+                return {'status': 'ok', 'host': host, 'repo_count': repo_count, 'output': out[:200]}
+            else:
+                return {'status': 'error', 'host': host, 'error': 'yum不可用或无可⽤仓库'}
+        except Exception as e:
+            return {'status': 'error', 'host': host, 'error': str(e)[:100]}
+
+    def _init_check_yum_status(self):
+        """批量检测所有服务器的YUM源状态"""
+        if not hasattr(self, 'init_servers') or not self.init_servers:
+            return
+        
+        # 先停止之前的检测线程
+        if self._init_yum_check_worker and self._init_yum_check_worker.isRunning():
+            self._init_yum_check_worker.cancel()
+            self._init_yum_check_worker.wait(2000)
+        
+        # 更新表格状态为"检测中"
+        for row in range(self.init_table.rowCount()):
+            item = self.init_table.item(row, 4)
+            if item:
+                item.setText("⏳ 检测中...")
+                item.setForeground(QColor("#0984e3"))
+        
+        self._log(self._tr(
+            f"🔍 开始检测 {len(self.init_servers)} 个服务器的YUM源状态...",
+            f"🔍 Checking YUM status for {len(self.init_servers)} servers..."
+        ))
+        
+        # 禁用按钮，防止重复点击
+        self.init_yum_check_btn.setEnabled(False)
+        
+        # 创建批量SSH工作线程
+        self._init_yum_check_worker = BatchSSHWorker()
+        self._init_yum_check_worker.servers = self.init_servers
+        self._init_yum_check_worker.handler = self._init_yum_check_handler
+        self._init_yum_check_worker.log.connect(self._log)
+        self._init_yum_check_worker.result.connect(self._init_on_yum_check_result)
+        self._init_yum_check_worker.finished_signal.connect(
+            lambda msg: self._on_init_yum_check_finished(msg)
+        )
+        self._init_yum_check_worker.start()
+
+    def _on_init_yum_check_finished(self, msg: str):
+        """YUM检测完成，恢复按钮状态"""
+        self.init_yum_check_btn.setEnabled(True)
+        self._log(self._tr(f"✅ YUM状态检测完成: {msg}", f"✅ YUM check done: {msg}"))
+
+    def _init_on_yum_check_result(self, index: int, data: dict):
+        """处理YUM检测结果，更新表格"""
+        if not hasattr(self, 'init_table'):
+            return
+        if index >= self.init_table.rowCount():
+            return
+        
+        item = self.init_table.item(index, 4)
+        if not item:
+            item = QTableWidgetItem()
+            self.init_table.setItem(index, 4, item)
+        
+        status = data.get('status', 'unknown')
+        host = data.get('host', '')
+        
+        if status == 'ok':
+            repo_count = data.get('repo_count', 0)
+            text = f"✅ 正常({repo_count}个仓库)" if repo_count else "✅ 正常"
+            color = "#00b894"
+        else:
+            error = data.get('error', '未知错误')
+            text = f"❌ {error[:30]}"
+            color = "#d63031"
+        
+        item.setText(text)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        item.setForeground(QColor(color))
+        
+        # 日志只记录异常
+        if status != 'ok':
+            self._log(self._tr(
+                f"⚠️ {host} YUM源异常: {error}",
+                f"⚠️ {host} YUM unavailable: {error}"
+            ))
+
     def _init_on_select_all_toggled(self, checked):
         """全选/取消全选任务"""
         for chk in self.init_task_checkboxes:
