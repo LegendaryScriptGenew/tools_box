@@ -4178,6 +4178,55 @@ class MainWindow(QMainWindow):
         self.init_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.init_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.init_table.setAlternatingRowColors(True)
+        self.init_table.verticalHeader().setVisible(False)  # 隐藏默认行号
+        self.init_table.verticalHeader().setDefaultSectionSize(32)  # 行高32px
+        # 列宽策略：勾选列固定，IP/用户名/YUM状态拉伸，端口固定
+        header = self.init_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)  # 勾选列
+        header.resizeSection(0, 40)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # IP列拉伸
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)  # 端口列
+        header.resizeSection(2, 70)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # 用户名列
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)  # YUM状态列
+        header.setStretchLastSection(False)  # 不要让最后一列自动填充
+        header.setMinimumHeight(36)  # 表头高度
+        header.setHighlightSections(False)
+        # 美化表格样式
+        self.init_table.setShowGrid(True)
+        self.init_table.setStyleSheet("""
+            QTableWidget {
+                border: 1px solid #dfe6e9;
+                border-radius: 6px;
+                background: white;
+                gridline-color: #ecf0f1;
+                font-size: 12px;
+                selection-background-color: #74b9ff;
+                selection-color: white;
+            }
+            QTableWidget::item {
+                padding: 6px 8px;
+                border: none;
+            }
+            QTableWidget::item:selected {
+                background: #74b9ff;
+                color: white;
+            }
+            QHeaderView::section {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #f8f9fa, stop:1 #e9ecef);
+                color: #2d3436;
+                padding: 8px;
+                border: none;
+                border-right: 1px solid #dfe6e9;
+                border-bottom: 2px solid #00b894;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QTableWidget::item:alternate {
+                background: #fafbfc;
+            }
+        """)
         right_layout.addWidget(self.init_table)
         
         splitter.addWidget(right_widget)
