@@ -845,6 +845,7 @@ class BatchSSHWorker(QThread):
     log = Signal(str)               # 日志消息
     progress = Signal(int, int)     # 当前索引, 总数
     finished_signal = Signal(str)   # 完成汇总信息
+    result = Signal(int, object)    # 服务器索引, 状态结果(dict)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -886,14 +887,19 @@ class BatchSSHWorker(QThread):
                 )
             except Exception as e:
                 self.log.emit(f"❌ {host} 连接失败（超时{self.connect_timeout}s）: {str(e)}")
+                self.result.emit(i, {'status': 'error', 'host': host, 'error': str(e)})
                 fail += 1
                 continue
 
             try:
-                self.handler(client, server, lambda msg: self.log.emit(msg))
+                ret = self.handler(client, server, lambda msg: self.log.emit(msg))
+                # 如果 handler 返回了结构化结果，发出 result 信号
+                if ret is not None:
+                    self.result.emit(i, ret)
                 success += 1
             except Exception as e:
                 self.log.emit(f"❌ {host} 操作失败: {str(e)}")
+                self.result.emit(i, {'status': 'error', 'host': host, 'error': str(e)})
                 fail += 1
             finally:
                 try:
@@ -903,6 +909,93 @@ class BatchSSHWorker(QThread):
 
         self.progress.emit(total, total)
         self.finished_signal.emit(f"完成: 成功 {success}, 失败 {fail}")
+
+
+# ============================================================
+#  NTP 服务器列表行控件
+# ============================================================
+class NTPServerRowWidget(QWidget):
+    """NTP服务器列表的单行控件：左侧显示连接信息，右侧居中显示状态"""
+
+    def __init__(self, index, host, port, username, lang="zh", parent=None):
+        super().__init__(parent)
+        self.lang = lang
+        self._index = index
+        self._full_status_text = ""
+        self.setMinimumHeight(32)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(16)
+
+        # 左侧：序号 + 连接信息（固定宽度）
+        self.info_label = QLabel(f"{index}.  {username}@{host}:{port}")
+        self.info_label.setStyleSheet(
+            "font-size: 12px; font-weight: bold; color: #2d3436;"
+        )
+        self.info_label.setMinimumWidth(200)
+        self.info_label.setMaximumWidth(260)
+        layout.addWidget(self.info_label, 0, Qt.AlignmentFlag.AlignVCenter)
+
+        # 右侧：状态（拉伸填充，居中显示）
+        self.status_label = QLabel("⏳ " + ("待检测" if lang != "en" else "Pending"))
+        self.status_label.setAlignment(
+            Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.status_label.setStyleSheet("font-size: 12px; color: #b2bec3;")
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        layout.addWidget(self.status_label, 1, Qt.AlignmentFlag.AlignVCenter)
+
+    def resizeEvent(self, event):
+        """窗口大小变化时重新计算省略文本"""
+        super().resizeEvent(event)
+        if self._full_status_text:
+            self._refresh_elided_text()
+
+    def _refresh_elided_text(self):
+        """按当前可用宽度省略显示状态文本"""
+        fm = self.status_label.fontMetrics()
+        avail = max(100, self.status_label.width())
+        elided = fm.elidedText(
+            self._full_status_text,
+            Qt.TextElideMode.ElideRight,
+            avail
+        )
+        self.status_label.setText(elided)
+        self.status_label.setToolTip(self._full_status_text)
+
+    def set_pending(self):
+        """设置为检测中状态"""
+        text = "⏳ " + ("检测中..." if self.lang != "en" else "Checking...")
+        self._full_status_text = text
+        self._refresh_elided_text()
+        self.status_label.setStyleSheet("font-size: 12px; color: #0984e3;")
+
+    def set_status(self, data: dict):
+        """根据状态数据更新显示"""
+        status = data.get('status', 'unknown')
+        if status == 'ok':
+            text = (f"✅ 服务:{data.get('service','')}  同步:{data.get('sync','')}  "
+                    f"NTP源:{data.get('ntp_source','')}  时区:{data.get('timezone','')}  "
+                    f"时间:{data.get('time','')}")
+            color = "#00b894"
+        elif status == 'warning':
+            text = (f"⚠️ 服务:{data.get('service','')}  同步:{data.get('sync','')}  "
+                    f"NTP源:{data.get('ntp_source','')}  时区:{data.get('timezone','')}  "
+                    f"时间:{data.get('time','')}")
+            color = "#e17055"
+        elif status == 'error':
+            err = data.get('error', '未知错误')
+            if len(err) > 60:
+                err = err[:60] + "..."
+            text = f"❌ " + ("连接失败" if self.lang != "en" else "Connection failed") + f": {err}"
+            color = "#d63031"
+        else:
+            text = "⏳ " + ("待检测" if self.lang != "en" else "Pending")
+            color = "#b2bec3"
+        self._full_status_text = text
+        self._refresh_elided_text()
+        self.status_label.setStyleSheet(f"font-size: 12px; color: {color};")
 
 
 # ============================================================
@@ -3314,6 +3407,7 @@ class MainWindow(QMainWindow):
     def _build_ntp_page(self) -> QWidget:
         """构建NTP时间同步标签页（优化布局）"""
         self.ntp_servers = []  # 存储服务器列表
+        self.ntp_row_widgets = []  # 存储行控件引用
         self.ntp_worker = None  # SSH工作线程
         
         page = QWidget()
@@ -3354,49 +3448,69 @@ class MainWindow(QMainWindow):
         # ========== 2. NTP配置参数卡片 ==========
         ntp_card = QGroupBox(self._tr(" NTP 配置参数 ", " NTP Config Parameters "))
         ntp_card.setStyleSheet("""
-            QGroupBox { font-size: 13px; font-weight: bold; color: #00b894; 
+            QGroupBox { font-size: 13px; font-weight: bold; color: #00b894;
                         border: 1px solid #dfe6e9; border-radius: 6px; margin-top: 8px; }
             QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 5px; }
         """)
         ntp_layout = QGridLayout(ntp_card)
-        ntp_layout.setSpacing(10)
+        ntp_layout.setHorizontalSpacing(8)
+        ntp_layout.setVerticalSpacing(10)
         ntp_layout.setContentsMargins(12, 16, 12, 12)
-        
+
+        # 列宽策略：第0/2列(标签)按内容自适应；第1/3列(输入框)按比例拉伸
+        ntp_layout.setColumnStretch(0, 0)
+        ntp_layout.setColumnStretch(1, 1)
+        ntp_layout.setColumnStretch(2, 0)
+        ntp_layout.setColumnStretch(3, 2)
+
         # NTP服务器
-        ntp_layout.addWidget(QLabel(self._tr("NTP服务器:", "NTP Server:")), 0, 0)
+        ntp_label_style = "font-size: 12px; color: #2d3436;"
+        lbl_ntp_server = QLabel(self._tr("NTP服务器:", "NTP Server:"))
+        lbl_ntp_server.setStyleSheet(ntp_label_style)
+        lbl_ntp_server.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        ntp_layout.addWidget(lbl_ntp_server, 0, 0)
         self.ntp_server_edit = QLineEdit("ntp.aliyun.com")
         self.ntp_server_edit.setStyleSheet("""
-            QLineEdit { border: 1px solid #dfe6e9; border-radius: 4px; 
+            QLineEdit { border: 1px solid #dfe6e9; border-radius: 4px;
                         padding: 6px 8px; font-size: 12px; background: white; }
             QLineEdit:focus { border: 1px solid #00b894; }
         """)
         ntp_layout.addWidget(self.ntp_server_edit, 0, 1, 1, 3)
-        
+
         # MinPoll & MaxPoll
-        ntp_layout.addWidget(QLabel(self._tr("MinPoll:", "MinPoll:")), 1, 0)
+        lbl_min = QLabel(self._tr("MinPoll:", "MinPoll:"))
+        lbl_min.setStyleSheet(ntp_label_style)
+        lbl_min.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        ntp_layout.addWidget(lbl_min, 1, 0)
         self.ntp_minpoll = QSpinBox()
         self.ntp_minpoll.setRange(3, 17)
         self.ntp_minpoll.setValue(6)
         self.ntp_minpoll.setStyleSheet("""
-            QSpinBox { border: 1px solid #dfe6e9; border-radius: 4px; 
+            QSpinBox { border: 1px solid #dfe6e9; border-radius: 4px;
                        padding: 4px; font-size: 12px; background: white; }
             QSpinBox:focus { border: 1px solid #00b894; }
         """)
         ntp_layout.addWidget(self.ntp_minpoll, 1, 1)
-        
-        ntp_layout.addWidget(QLabel(self._tr("MaxPoll:", "MaxPoll:")), 1, 2)
+
+        lbl_max = QLabel(self._tr("MaxPoll:", "MaxPoll:"))
+        lbl_max.setStyleSheet(ntp_label_style)
+        lbl_max.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        ntp_layout.addWidget(lbl_max, 1, 2)
         self.ntp_maxpoll = QSpinBox()
         self.ntp_maxpoll.setRange(3, 17)
         self.ntp_maxpoll.setValue(10)
         self.ntp_maxpoll.setStyleSheet(self.ntp_minpoll.styleSheet())
         ntp_layout.addWidget(self.ntp_maxpoll, 1, 3)
-        
+
         # Step模式 & 时区
         self.ntp_step = QCheckBox(self._tr("启用Step模式", "Enable Step Mode"))
         self.ntp_step.setStyleSheet("font-size: 12px; color: #2d3436;")
         ntp_layout.addWidget(self.ntp_step, 2, 0, 1, 2)
-        
-        ntp_layout.addWidget(QLabel(self._tr("时区:", "Timezone:")), 2, 2)
+
+        lbl_tz = QLabel(self._tr("时区:", "Timezone:"))
+        lbl_tz.setStyleSheet(ntp_label_style)
+        lbl_tz.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        ntp_layout.addWidget(lbl_tz, 2, 2)
         self.ntp_timezone = QComboBox()
         self.ntp_timezone.addItems([
             "Asia/Shanghai", "Asia/Hong_Kong", "Asia/Taipei",
@@ -3405,12 +3519,12 @@ class MainWindow(QMainWindow):
         ])
         self.ntp_timezone.setCurrentText("Asia/Shanghai")
         self.ntp_timezone.setStyleSheet("""
-            QComboBox { border: 1px solid #dfe6e9; border-radius: 4px; 
+            QComboBox { border: 1px solid #dfe6e9; border-radius: 4px;
                         padding: 4px 8px; font-size: 12px; background: white; }
             QComboBox:focus { border: 1px solid #00b894; }
         """)
         ntp_layout.addWidget(self.ntp_timezone, 2, 3)
-        
+
         main_layout.addWidget(ntp_card)
         
         # ========== 3. 服务器配置卡片 ==========
@@ -3670,11 +3784,19 @@ class MainWindow(QMainWindow):
                     "Invalid Excel format!\n\nSupported formats:\n1. New: host, port, username, password\n2. Old: IP, 用户名, 密码"
                 ))
             
-            # 更新服务器列表显示
+            # 更新服务器列表显示（使用自定义行控件）
             self.ntp_server_list.clear()
+            self.ntp_row_widgets = []
             for i, server in enumerate(self.ntp_servers, 1):
-                item_text = f"{i}. {server['username']}@{server['host']}:{server['port']}"
-                self.ntp_server_list.addItem(item_text)
+                item = QListWidgetItem()
+                row_widget = NTPServerRowWidget(
+                    i, server['host'], server['port'], server['username'],
+                    lang=self.lang
+                )
+                item.setSizeHint(row_widget.sizeHint())
+                self.ntp_server_list.addItem(item)
+                self.ntp_server_list.setItemWidget(item, row_widget)
+                self.ntp_row_widgets.append(row_widget)
             
             self._log(self._tr(
                 f"✅ 成功加载 {len(self.ntp_servers)} 个服务器配置",
@@ -3690,6 +3812,7 @@ class MainWindow(QMainWindow):
     def _ntp_clear_servers(self):
         """清空服务器列表"""
         self.ntp_servers = []
+        self.ntp_row_widgets = []
         self.ntp_file_edit.clear()
         self.ntp_server_list.clear()
         self._log(self._tr("已清空服务器列表", "Server list cleared"))
@@ -3801,6 +3924,10 @@ class MainWindow(QMainWindow):
         self._log(self._tr("="*60, "=" * 60))
         self._log(self._tr("开始获取NTP状态...", "Starting NTP status check..."))
 
+        # 将所有行设为"检测中"状态
+        for row in getattr(self, 'ntp_row_widgets', []):
+            row.set_pending()
+
         def handler(client, server, log_fn):
             host = server.get('host', '')
             # 1. 服务状态
@@ -3827,9 +3954,17 @@ class MainWindow(QMainWindow):
             else:
                 timezone = "Unknown"
 
-            icon = "✅" if service_ok and synced else "⚠️"
-            log_fn(f"  {host} - {icon} 服务:{'正常' if service_ok else '异常'} 同步:{'正常' if synced else '异常'} "
-                   f"NTP源:{ntp_server_ip} 时区:{timezone} 时间:{current_time}")
+            # 返回结构化结果（由 result 信号回传到行控件显示）
+            log_fn(f"  ✅ {host} " + self._tr("连接成功", "connected"))
+            return {
+                'status': 'ok' if service_ok and synced else 'warning',
+                'host': host,
+                'service': '正常' if service_ok else '异常',
+                'sync': '正常' if synced else '异常',
+                'ntp_source': ntp_server_ip,
+                'timezone': timezone,
+                'time': current_time,
+            }
 
         self._start_ntp_worker(handler)
 
@@ -3852,6 +3987,7 @@ class MainWindow(QMainWindow):
         self._ntp_worker.log.connect(self._on_ntp_worker_log)
         self._ntp_worker.progress.connect(self._on_ntp_worker_progress)
         self._ntp_worker.finished_signal.connect(self._on_ntp_worker_finished)
+        self._ntp_worker.result.connect(self._on_ntp_worker_result)
 
         # 禁用按钮，显示进度条
         self.ntp_configure_btn.setEnabled(False)
@@ -3880,6 +4016,12 @@ class MainWindow(QMainWindow):
         self.ntp_restore_btn.setEnabled(True)
         self.ntp_status_btn.setEnabled(True)
         self.ntp_progress.setVisible(False)
+
+    def _on_ntp_worker_result(self, index: int, data: dict):
+        """工作线程回传单台服务器状态结果，更新对应行控件"""
+        row_widgets = getattr(self, 'ntp_row_widgets', [])
+        if 0 <= index < len(row_widgets):
+            row_widgets[index].set_status(data)
     def _build_init_page(self) -> QWidget:
         """构建系统初始化标签页"""
         page = QWidget()
